@@ -65,6 +65,11 @@ private:
     void handleSliceStatus(int id, const QMap<QString, QString>& kvs, bool removed);
     void handleMeterStatus(const QMap<QString, QString>& kvs);
 
+    // Standalone mode: create a panadapter then attach a slice to it.
+    void createDefaultSlice(const QString& freqMhz = "14.225000",
+                            const QString& mode    = "USB",
+                            const QString& antenna = "ANT1");
+
     RadioConnection m_connection;
 
     QString m_name;

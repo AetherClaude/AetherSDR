@@ -57,24 +57,31 @@ void RadioModel::onConnected()
     qDebug() << "RadioModel: connected";
     emit connectionStateChanged(true);
 
-    // Identify this client to the radio.
+    // Identify this client to the radio (cosmetic; error is non-fatal).
     m_connection.sendCommand("client program AetherSDR");
-    m_connection.sendCommand("client station AetherSDR");
 
-    // Request the current slice list. On some firmware the radio pushes
-    // slice status automatically after "sub slice all"; on others we must
-    // request it explicitly. The response body is space-separated IDs, e.g. "0 1 2 3".
+    // Request the current slice list.
+    // SmartConnect mode: body = "0 1 2 3" — request each slice's state.
+    // Standalone mode:   body = ""        — no slices exist, create one.
     m_connection.sendCommand("slice list",
         [this](int code, const QString& body) {
             if (code != 0) {
                 qWarning() << "RadioModel: slice list failed, code" << Qt::hex << code;
                 return;
             }
-            qDebug() << "RadioModel: slice list ->" << body;
-            for (const QString& idStr : body.trimmed().split(' ', Qt::SkipEmptyParts)) {
-                bool ok = false;
-                const int id = idStr.toInt(&ok);
-                if (ok) m_connection.sendCommand(QString("slice get %1").arg(id));
+            const QStringList ids = body.trimmed().split(' ', Qt::SkipEmptyParts);
+            qDebug() << "RadioModel: slice list ->" << (ids.isEmpty() ? "(empty)" : body);
+
+            if (ids.isEmpty()) {
+                // Standalone mode: no slices — create panadapter + slice.
+                createDefaultSlice();
+            } else {
+                // SmartConnect mode: request current state for each existing slice.
+                for (const QString& idStr : ids) {
+                    bool ok = false;
+                    const int id = idStr.toInt(&ok);
+                    if (ok) m_connection.sendCommand(QString("slice get %1").arg(id));
+                }
             }
         });
 
@@ -131,7 +138,11 @@ void RadioModel::onStatusReceived(const QString& object,
 
     if (object.startsWith("meter")) {
         handleMeterStatus(kvs);
+        return;
     }
+
+    // Panadapter / display objects are handled by PanadapterStream (future).
+    // Interlock, ATU, EQ, WAN, transmit etc. are informational — ignore for now.
 }
 
 void RadioModel::handleRadioStatus(const QMap<QString, QString>& kvs)
@@ -184,6 +195,56 @@ void RadioModel::handleMeterStatus(const QMap<QString, QString>& kvs)
     if (kvs.contains("patemp"))
         m_paTemp = kvs["patemp"].toFloat();
     emit metersChanged();
+}
+
+// ─── Standalone mode: create panadapter + slice ───────────────────────────────
+//
+// SmartSDR API standalone flow:
+//   1. "display panafall create"
+//      → R|0|<pan_stream_id>   (hex, e.g. "0x40000000")
+//   2. "slice create pan=<pan_stream_id> freq=<mhz> antenna=<ant> mode=<mode>"
+//      → R|0|<slice_index>     (decimal, e.g. "0")
+//   3. Radio emits S messages for the new panadapter and slice.
+
+void RadioModel::createDefaultSlice(const QString& freqMhz,
+                                     const QString& mode,
+                                     const QString& antenna)
+{
+    qDebug() << "RadioModel: standalone mode — creating panadapter + slice"
+             << freqMhz << mode << antenna;
+
+    m_connection.sendCommand("display panafall create",
+        [this, freqMhz, mode, antenna](int code, const QString& body) {
+            if (code != 0) {
+                qWarning() << "RadioModel: display panafall create failed, code"
+                           << Qt::hex << code;
+                return;
+            }
+
+            // body is the panadapter stream ID, e.g. "0x40000000"
+            const QString panId = body.trimmed();
+            qDebug() << "RadioModel: panadapter created, pan_id =" << panId;
+
+            if (panId.isEmpty()) {
+                qWarning() << "RadioModel: display panafall create returned empty pan_id";
+                return;
+            }
+
+            const QString sliceCmd = QString("slice create pan=%1 freq=%2 antenna=%3 mode=%4")
+                                         .arg(panId, freqMhz, antenna, mode);
+
+            m_connection.sendCommand(sliceCmd,
+                [](int code2, const QString& body2) {
+                    if (code2 != 0) {
+                        qWarning() << "RadioModel: slice create failed, code"
+                                   << Qt::hex << code2;
+                    } else {
+                        qDebug() << "RadioModel: slice created, index =" << body2;
+                        // Radio will now emit S messages for the new slice;
+                        // handleSliceStatus() picks them up automatically.
+                    }
+                });
+        });
 }
 
 } // namespace AetherSDR
