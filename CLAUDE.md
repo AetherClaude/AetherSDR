@@ -30,7 +30,7 @@ cmake --build build -j$(nproc)
 
 Dependencies (Arch): `qt6-base qt6-multimedia cmake ninja pkgconf`
 
-Current version: **0.1.5** (set in both `CMakeLists.txt` and `README.md`).
+Current version: **0.1.6** (set in both `CMakeLists.txt` and `README.md`).
 
 ---
 
@@ -280,6 +280,20 @@ them with `slice get <id>` rather than creating new ones.
 
 ---
 
+## Known Bugs
+
+- **Tuner applet SWR capture**: The final SWR displayed after a TGXL autotune
+  cycle is inaccurate. During tuning the SWR meter streams via VITA-49 UDP while
+  relay status arrives via TCP — there is a race between tuning=0 (TCP) and the
+  final settled SWR meter reading (UDP). Current approach tracks the minimum SWR
+  seen during tuning, but this captures mid-search transients (~1.5x) rather than
+  the actual settled result (~1.01–1.15). Needs investigation with timestamped
+  meter logging to understand the exact arrival order of SWR values relative to
+  the tuning=0 status change. See `TunerApplet::updateMeters()` and the
+  `tuningChanged` lambda in `TunerApplet::setTunerModel()`.
+
+---
+
 ## Known Quirks / Lessons Learned
 
 - `QMap<K,V>` needs `#include <QMap>` in headers — forward-declaration in
@@ -294,7 +308,7 @@ them with `slice get <id>` rather than creating new ones.
 
 ---
 
-## What's Implemented (v0.1.5)
+## What's Implemented (v0.1.6)
 
 - UDP radio discovery and TCP command/control
 - SmartSDR V/H/R/S/M protocol parsing
@@ -309,7 +323,11 @@ them with `slice get <id>` rather than creating new ones.
   NB/NR/ANF, RIT/XIT, tuning step stepper, tune lock
 - Frequency dial: click, scroll, keyboard, direct entry
 - Spectrum: click-to-tune, scroll-to-tune, filter passband overlay
-- AppletPanel: toggle-button row (ANLG, RX, TX, PHNE, P/CW, EQ)
+- AppletPanel: toggle-button row (ANLG, RX, TUNE, TX, PHNE, P/CW, EQ)
+- Tuner applet (4o3a TGXL): Fwd Power/SWR gauges, C1/L/C2 relay bars,
+  TUNE (autotune) and OPERATE/BYPASS/STANDBY buttons
+- Tuner auto-detect: hidden when no TGXL, appears on amplifier subscription
+- Fwd Power gauge auto-scales: barefoot (0–200 W) vs PGXL (0–2000 W)
 - TX button (sends `xmit 1` / `xmit 0`)
 - Persistent window geometry
 
@@ -328,5 +346,4 @@ them with `slice get <id>` rather than creating new ones.
 - Macro / voice keyer
 - Network audio (Opus compression)
 - TNF (tracking notch filter) management
-- Antenna tuner (ATU) control
 - Full TX applet (mic gain, compression, monitor, etc.)

@@ -1,0 +1,63 @@
+#pragma once
+
+#include <QObject>
+#include <QMap>
+#include <QString>
+
+namespace AetherSDR {
+
+// State model for a 4o3a Tuner Genius XL (TGXL) connected via the FlexRadio.
+//
+// Status arrives via TCP as "atu <handle> key=val ..." after "sub atu all".
+// Commands use the "tgxl" prefix:
+//   tgxl set handle=<H> mode=<0|1>       — operate/standby
+//   tgxl set handle=<H> bypass=<0|1>     — bypass on/off
+//   tgxl autotune handle=<H>             — initiate auto-tune
+class TunerModel : public QObject {
+    Q_OBJECT
+
+public:
+    explicit TunerModel(QObject* parent = nullptr);
+
+    // Getters
+    QString handle()    const { return m_handle; }
+    QString modelName() const { return m_model; }
+    QString serialNum() const { return m_serialNum; }
+    bool    isOperate() const { return m_operate; }
+    bool    isBypass()  const { return m_bypass; }
+    bool    isTuning()  const { return m_tuning; }
+    int     relayC1()   const { return m_relayC1; }
+    int     relayL()    const { return m_relayL; }
+    int     relayC2()   const { return m_relayC2; }
+    bool    isPresent() const { return !m_handle.isEmpty(); }
+
+    // Apply key=value pairs from a TCP status message.
+    void applyStatus(const QMap<QString, QString>& kvs);
+
+    // Set the tuner handle (extracted from the status object name).
+    void setHandle(const QString& handle);
+
+    // Command methods — emit commandReady()
+    void setOperate(bool on);
+    void setBypass(bool on);
+    void autoTune();
+
+signals:
+    void stateChanged();               // any property changed
+    void tuningChanged(bool tuning);   // tuning started/stopped
+    void presenceChanged(bool present); // tuner detected / lost
+    void commandReady(const QString& cmd);
+
+private:
+    QString m_handle;
+    QString m_model;
+    QString m_serialNum;
+    bool    m_operate{false};
+    bool    m_bypass{false};
+    bool    m_tuning{false};
+    int     m_relayC1{0};
+    int     m_relayL{0};
+    int     m_relayC2{0};
+};
+
+} // namespace AetherSDR

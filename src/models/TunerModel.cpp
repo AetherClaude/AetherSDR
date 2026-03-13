@@ -1,0 +1,104 @@
+#include "TunerModel.h"
+
+#include <QDebug>
+
+namespace AetherSDR {
+
+TunerModel::TunerModel(QObject* parent)
+    : QObject(parent)
+{
+}
+
+// ── Status parsing ──────────────────────────────────────────────────────────
+
+void TunerModel::setHandle(const QString& handle)
+{
+    if (m_handle == handle) return;
+    bool wasPres = !m_handle.isEmpty();
+    m_handle = handle;
+    bool nowPres = !m_handle.isEmpty();
+    qDebug() << "TunerModel: handle set to" << m_handle;
+    if (wasPres != nowPres)
+        emit presenceChanged(nowPres);
+    emit stateChanged();
+}
+
+void TunerModel::applyStatus(const QMap<QString, QString>& kvs)
+{
+    bool changed = false;
+
+    for (auto it = kvs.constBegin(); it != kvs.constEnd(); ++it) {
+        const QString& key = it.key();
+        const QString& val = it.value();
+
+        if (key == "serial_num") {
+            if (m_serialNum != val) { m_serialNum = val; changed = true; }
+        } else if (key == "model") {
+            if (m_model != val) { m_model = val; changed = true; }
+        } else if (key == "operate") {
+            bool on = (val == "1");
+            if (m_operate != on) { m_operate = on; changed = true; }
+        } else if (key == "bypass") {
+            bool on = (val == "1");
+            if (m_bypass != on) { m_bypass = on; changed = true; }
+        } else if (key == "tuning") {
+            bool on = (val == "1");
+            if (m_tuning != on) {
+                m_tuning = on;
+                changed = true;
+                emit tuningChanged(m_tuning);
+            }
+        } else if (key == "relayC1") {
+            int v = val.toInt();
+            if (m_relayC1 != v) { m_relayC1 = v; changed = true; }
+        } else if (key == "relayC2") {
+            int v = val.toInt();
+            if (m_relayC2 != v) { m_relayC2 = v; changed = true; }
+        } else if (key == "relayL") {
+            int v = val.toInt();
+            if (m_relayL != v) { m_relayL = v; changed = true; }
+        }
+        // nickname, version, ant, dhcp, ip, netmask, gateway, ptta, pttb
+        // are informational — ignore for now.
+    }
+
+    if (changed)
+        emit stateChanged();
+}
+
+// ── Commands ─────────────────────────────────────────────────────────────────
+
+void TunerModel::setOperate(bool on)
+{
+    if (m_handle.isEmpty()) {
+        qDebug() << "TunerModel::setOperate: no handle yet, ignoring";
+        return;
+    }
+    const QString cmd = "tgxl set handle=" + m_handle + " mode=" + (on ? "1" : "0");
+    qDebug() << "TunerModel:" << cmd;
+    emit commandReady(cmd);
+}
+
+void TunerModel::setBypass(bool on)
+{
+    if (m_handle.isEmpty()) {
+        qDebug() << "TunerModel::setBypass: no handle yet, ignoring";
+        return;
+    }
+    const QString cmd = "tgxl set handle=" + m_handle + " bypass=" + (on ? "1" : "0");
+    qDebug() << "TunerModel:" << cmd;
+    emit commandReady(cmd);
+}
+
+void TunerModel::autoTune()
+{
+    if (m_handle.isEmpty()) {
+        qDebug() << "TunerModel::autoTune: no handle yet, ignoring";
+        return;
+    }
+    const QString cmd = "tgxl autotune handle=" + m_handle;
+    qDebug() << "TunerModel:" << cmd;
+    emit commandReady(cmd);
+}
+
+} // namespace AetherSDR

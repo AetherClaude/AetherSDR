@@ -5,8 +5,10 @@
 #include "AppletPanel.h"
 #include "RxApplet.h"
 #include "SMeterWidget.h"
+#include "TunerApplet.h"
 #include "models/SliceModel.h"
 #include "models/MeterModel.h"
+#include "models/TunerModel.h"
 
 #include <QApplication>
 #include <QVBoxLayout>
@@ -108,6 +110,20 @@ MainWindow::MainWindow(QWidget* parent)
     // ── S-Meter: MeterModel → SMeterWidget ────────────────────────────────
     connect(m_radioModel.meterModel(), &MeterModel::sLevelChanged,
             m_appletPanel->sMeterWidget(), &SMeterWidget::setLevel);
+
+    // ── Tuner: MeterModel TX meters → TunerApplet gauges ────────────────
+    connect(m_radioModel.meterModel(), &MeterModel::txMetersChanged,
+            m_appletPanel->tunerApplet(), &TunerApplet::updateMeters);
+    m_appletPanel->tunerApplet()->setTunerModel(m_radioModel.tunerModel());
+    m_appletPanel->tunerApplet()->setMeterModel(m_radioModel.meterModel());
+
+    // Show/hide TUNE button + applet based on TGXL presence
+    connect(m_radioModel.tunerModel(), &TunerModel::presenceChanged,
+            m_appletPanel, &AppletPanel::setTunerVisible);
+
+    // Switch Fwd Power gauge scale when a power amplifier (PGXL) is detected
+    connect(&m_radioModel, &RadioModel::amplifierChanged,
+            m_appletPanel->tunerApplet(), &TunerApplet::setAmplifierMode);
 
     // ── Audio level meter ──────────────────────────────────────────────────
     connect(&m_audio, &AudioEngine::levelChanged,

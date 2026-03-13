@@ -1,6 +1,7 @@
 #include "AppletPanel.h"
 #include "RxApplet.h"
 #include "SMeterWidget.h"
+#include "TunerApplet.h"
 
 #include <QPushButton>
 #include <QScrollArea>
@@ -129,6 +130,17 @@ AppletPanel::AppletPanel(QWidget* parent) : QWidget(parent)
     static_cast<QPushButton*>(btnLayout->itemAt(1)->widget())->setChecked(true);
     m_rxApplet->show();
 
+    // Tuner applet — hidden until TGXL detected via amplifier subscription
+    m_tunerApplet = new TunerApplet;
+    {
+        m_tuneBtn = new QPushButton("TUNE", btnRow);
+        m_tuneBtn->setCheckable(true);
+        m_tuneBtn->hide();  // hidden until setTunerVisible(true)
+        btnLayout->addWidget(m_tuneBtn);
+        m_stack->insertWidget(m_stack->count() - 1, m_tunerApplet);
+        connect(m_tuneBtn, &QPushButton::toggled, m_tunerApplet, &QWidget::setVisible);
+    }
+
     // Placeholder applets — hidden by default
     addApplet("TX",   makePlaceholder("TX"));
     addApplet("PHNE", makePlaceholder("PHNE"));
@@ -136,6 +148,19 @@ AppletPanel::AppletPanel(QWidget* parent) : QWidget(parent)
     addApplet("EQ",   makePlaceholder("EQ"));
 
     btnLayout->addStretch();
+}
+
+void AppletPanel::setTunerVisible(bool visible)
+{
+    if (visible) {
+        m_tuneBtn->show();
+        // Auto-check (show the applet) on first detection
+        if (!m_tuneBtn->isChecked())
+            m_tuneBtn->setChecked(true);
+    } else {
+        m_tuneBtn->setChecked(false);  // hide the applet
+        m_tuneBtn->hide();
+    }
 }
 
 void AppletPanel::setSlice(SliceModel* slice)

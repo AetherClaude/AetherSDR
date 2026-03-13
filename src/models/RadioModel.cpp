@@ -25,6 +25,11 @@ RadioModel::RadioModel(QObject* parent)
     connect(&m_panStream, &PanadapterStream::meterDataReady,
             &m_meterModel, &MeterModel::updateValues);
 
+    // Forward tuner commands to the radio
+    connect(&m_tunerModel, &TunerModel::commandReady, this, [this](const QString& cmd){
+        m_connection.sendCommand(cmd);
+    });
+
     m_reconnectTimer.setSingleShot(true);
     m_reconnectTimer.setInterval(3000);
     connect(&m_reconnectTimer, &QTimer::timeout, this, [this]() {
@@ -80,12 +85,13 @@ void RadioModel::onConnected()
     emit connectionStateChanged(true);
 
     // Full command sequence — each step waits for its R response before sending the next.
-    // sub slice all → sub pan all → sub tx all → sub atu all → sub meter all → sub audio all
-    //   → client gui → client program → [UDP registration] → client udpport N → slice list
+    // sub slice all → sub pan all → sub tx all → sub atu all → sub amplifier all
+    //   → sub meter all → sub audio all → client gui → client program → ...
     m_connection.sendCommand("sub slice all", [this](int, const QString&) {
       m_connection.sendCommand("sub pan all", [this](int, const QString&) {
       m_connection.sendCommand("sub tx all", [this](int, const QString&) {
         m_connection.sendCommand("sub atu all", [this](int, const QString&) {
+        m_connection.sendCommand("sub amplifier all", [this](int, const QString&) {
           m_connection.sendCommand("sub meter all", [this](int, const QString&) {
             m_connection.sendCommand("sub audio all", [this](int, const QString&) {
             m_connection.sendCommand("client gui", [this](int code, const QString&) {
@@ -148,6 +154,7 @@ void RadioModel::onConnected()
     }); // client gui
             }); // sub audio all
           }); // sub meter all
+        }); // sub amplifier all
         }); // sub atu all
       }); // sub tx all
       }); // sub pan all
@@ -252,7 +259,46 @@ void RadioModel::onStatusReceived(const QString& object,
         return;
     }
 
-    // Interlock, ATU, EQ, WAN, transmit etc. are informational — ignore for now.
+    // ATU status: "atu <handle> operate=1 bypass=0 ..."
+    static const QRegularExpression atuRe(R"(^atu\s+(\S+)$)");
+    if (object.startsWith("atu")) {
+        const auto m = atuRe.match(object);
+        if (m.hasMatch() && m_tunerModel.handle().isEmpty())
+            m_tunerModel.setHandle(m.captured(1));
+        m_tunerModel.applyStatus(kvs);
+        return;
+    }
+
+    // Amplifier status: both TGXL and PGXL report via the amplifier API.
+    // FlexLib distinguishes them by the "model" key:
+    //   model=TunerGeniusXL  → antenna tuner (TGXL)
+    //   model=PowerGeniusXL  → power amplifier (PGXL)
+    // "amplifier <handle> model=TunerGeniusXL operate=1 relayC1=20 ..."
+    static const QRegularExpression ampRe(R"(^amplifier\s+(\S+)$)");
+    if (object.startsWith("amplifier")) {
+        const auto m = ampRe.match(object);
+        if (m.hasMatch()) {
+            const QString handle = m.captured(1);
+            const QString model = kvs.value("model");
+
+            // Route TunerGeniusXL to TunerModel
+            if (model == "TunerGeniusXL" || handle == m_tunerModel.handle()) {
+                if (m_tunerModel.handle().isEmpty())
+                    m_tunerModel.setHandle(handle);
+                m_tunerModel.applyStatus(kvs);
+            }
+
+            // Detect power amplifier (PGXL or any non-TGXL amp)
+            if (!model.isEmpty() && model != "TunerGeniusXL" && !m_hasAmplifier) {
+                m_hasAmplifier = true;
+                qDebug() << "RadioModel: power amplifier detected, model=" << model;
+                emit amplifierChanged(true);
+            }
+        }
+        return;
+    }
+
+    // Interlock, EQ, WAN, transmit etc. are informational — ignore for now.
 }
 
 void RadioModel::handleRadioStatus(const QMap<QString, QString>& kvs)

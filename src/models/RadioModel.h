@@ -4,6 +4,7 @@
 #include "core/PanadapterStream.h"
 #include "SliceModel.h"
 #include "MeterModel.h"
+#include "TunerModel.h"
 
 #include <QObject>
 #include <QString>
@@ -33,6 +34,8 @@ public:
     RadioConnection*  connection()  { return &m_connection; }
     PanadapterStream* panStream()   { return &m_panStream; }
     MeterModel*       meterModel()  { return &m_meterModel; }
+    TunerModel*       tunerModel()  { return &m_tunerModel; }
+    bool              hasAmplifier() const { return m_hasAmplifier; }
 
     // Getters
     QString name()    const { return m_name; }
@@ -64,6 +67,8 @@ signals:
     void panadapterLevelChanged(float minDbm, float maxDbm);
     // Emitted when the radio reports its antenna list (e.g. "ANT1,ANT2,RX_A,RX_B").
     void antListChanged(QStringList ants);
+    // Emitted when a power amplifier (e.g. PGXL) is detected or lost.
+    void amplifierChanged(bool present);
 
 private slots:
     void onStatusReceived(const QString& object, const QMap<QString, QString>& kvs);
@@ -90,6 +95,7 @@ private:
     RadioConnection  m_connection;
     PanadapterStream m_panStream;
     MeterModel       m_meterModel;
+    TunerModel       m_tunerModel;
 
     QString     m_name;
     QString     m_model;
@@ -104,6 +110,8 @@ private:
     QString m_waterfallId;       // e.g. "0x42000000", from display waterfall status
     bool    m_panResized{false}; // true once we've sent the resize command
     bool    m_wfConfigured{false};
+
+    bool    m_hasAmplifier{false};  // true if a power amp (PGXL) is detected
 
     QList<SliceModel*> m_slices;
 

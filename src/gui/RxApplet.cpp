@@ -121,6 +121,7 @@ static const QString kAmberActive =
 
 RxApplet::RxApplet(QWidget* parent) : QWidget(parent)
 {
+    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     buildUI();
 }
 

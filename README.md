@@ -3,7 +3,7 @@
 A Linux-native SmartSDR-compatible client for FlexRadio Systems transceivers,
 built with **Qt6** and **C++20**.
 
-Current version: **0.1.5**
+Current version: **0.1.6**
 
 ---
 
@@ -38,6 +38,9 @@ Current version: **0.1.5**
 | AppletPanel — toggle-button row (ANLG, RX, TX, PHNE, P/CW, EQ) | ✅ |
 | VITA-49 meter decode (PCC 0x8002) + MeterModel registry | ✅ |
 | Analog S-Meter gauge (ANLG applet) with peak hold | ✅ |
+| Tuner applet (4o3a TGXL) — Fwd Power/SWR gauges, relay bars, TUNE/OPERATE | ✅ |
+| Tuner auto-detect — TUNE button hidden when no TGXL connected | ✅ |
+| Fwd Power gauge auto-scales for barefoot (200 W) vs PGXL (2000 W) | ✅ |
 | Audio TX (microphone → radio) | ⚠️ stub |
 | Volume / mute control | ✅ |
 | TX button | ✅ |
@@ -214,6 +217,23 @@ model-driven dial updates back to the radio.
 
 ## Changelog
 
+### v0.1.6
+- Tuner applet for 4o3a Tuner Genius XL (TGXL): Forward Power and SWR
+  horizontal gauges, C1/L/C2 relay position bars, TUNE and OPERATE buttons
+- TUNE button turns red during autotune, shows realtime SWR, flashes result
+- 3-state OPERATE button: cycles OPERATE (green) → BYPASS (orange) → STANDBY
+- Auto-detect: TUNE button and applet hidden when no TGXL connected; appears
+  automatically when TGXL detected via amplifier subscription
+- Forward Power gauge auto-scales: barefoot radio (0–200 W) vs PGXL amplifier
+  (0–2000 W), detected from amplifier model field
+- Compact 2-column layout: relay bars (70%) + buttons (30%) in one row
+- TunerModel: state model for TGXL (handle, operate, bypass, tuning, relays)
+  with command emission via amplifier API (`tgxl set`, `tgxl autotune`)
+- RadioModel: amplifier status dispatch — routes TunerGeniusXL to TunerModel,
+  detects power amplifiers (PGXL) separately
+- **Known bug**: SWR result captured during autotune does not match the actual
+  settled SWR (see Known Bugs section)
+
 ### v0.1.5
 - VITA-49 meter data decode (PCC 0x8002): N × (uint16 meter_id, int16 raw_value)
   pairs with unit-aware conversion (dBm/128, Volts/1024, degF/64)
@@ -277,6 +297,14 @@ model-driven dial updates back to the radio.
 - TCP command/control connection with SmartSDR V/H/R/S/M protocol
 - Panadapter VITA-49 UDP stream receiver and FFT spectrum display
 - Live dBm range calibration from `display pan` status messages
+
+---
+
+## Known Bugs
+
+- [ ] **Tuner SWR capture inaccurate**: TGXL autotune result SWR displayed on the
+  TUNE button does not match the actual settled SWR (shows ~1.5x instead of
+  ~1.01–1.15). Race between VITA-49 meter data (UDP) and tuning=0 status (TCP).
 
 ---
 
