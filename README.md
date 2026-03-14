@@ -1,4 +1,4 @@
-# AetherSDR Linux Native Client
+# AetherSDR Linux Native SDR Client for FlexRadios
 
 [![CI](https://github.com/ten9876/AetherSDR/actions/workflows/ci.yml/badge.svg)](https://github.com/ten9876/AetherSDR/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/ten9876/AetherSDR/actions/workflows/codeql.yml/badge.svg)](https://github.com/ten9876/AetherSDR/actions/workflows/codeql.yml)
