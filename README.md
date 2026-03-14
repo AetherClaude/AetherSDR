@@ -6,6 +6,8 @@
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![Qt6](https://img.shields.io/badge/Qt-6-green.svg)](https://www.qt.io/)
 
+AetherSDR is free and open-source software licensed under the GNU General Public License v3 (GPLv3).
+
 A Linux-native SmartSDR-compatible client for FlexRadio Systems transceivers,
 built with **Qt6** and **C++20**.
 
