@@ -33,6 +33,7 @@
 #include <QTimeZone>
 #include <QElapsedTimer>
 #include "core/LogManager.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -662,31 +663,38 @@ void SpectrumWidget::updateWaterfallRow(const QVector<float>& binsIntensity,
     // the black threshold to sit just above it. This replaces the radio's
     // auto_black which targets SmartSDR's different rendering engine.
     if (m_wfAutoBlack && !m_transmitting) {
-        // Estimate noise floor from incoming tiles.
+        // Estimate noise floor from incoming tiles using a lower-percentile
+        // approximation.  The mean is biased upward by signals; instead, collect
+        // sampled values, partial-sort to find the 25th percentile, and set the
+        // threshold well below it so the noise floor renders as faint colour
+        // while signals get the full gradient range.
         // Freeze during TX; threshold is restored to pre-TX value on TX→RX transition.
-        // Cheaper than full sort: sample every 8th bin.
-        float sum = 0;
-        float minVal = 1e9f, maxVal = -1e9f;
-        int count = 0;
-        for (int i = 0; i < binsIntensity.size(); i += 8) {
-            float v = binsIntensity[i];
-            sum += v;
-            if (v < minVal) minVal = v;
-            if (v > maxVal) maxVal = v;
-            count++;
-        }
-        if (count > 0) {
-            float mean = sum / count;
-            // Use mean as noise floor estimate (most bins are noise)
-            // Set threshold below mean so noise shows as faint dark blue
-            float target = mean - 3.0f;
+        QVector<float> samples;
+        samples.reserve(binsIntensity.size() / 8 + 1);
+        for (int i = 0; i < binsIntensity.size(); i += 8)
+            samples.append(binsIntensity[i]);
+        if (!samples.isEmpty()) {
+            // Partial sort to find the 25th percentile (lower quartile).
+            const int q1Idx = samples.size() / 4;
+            std::nth_element(samples.begin(), samples.begin() + q1Idx, samples.end());
+            const float q1 = samples[q1Idx];
+            // Place the black threshold 6 units below the lower quartile so that
+            // the noise floor appears as faint dark blue rather than solid black,
+            // giving signals more gradient headroom.
+            float target = q1 - 6.0f;
             // Smooth to prevent jitter
-            m_autoBlackThresh = 0.95f * m_autoBlackThresh + 0.05f * target;
+            m_autoBlackThresh = 0.93f * m_autoBlackThresh + 0.07f * target;
         }
     }
 
-    // One pixel row per tile — scroll speed determined by tile arrival rate.
+    // Compute how many pixel rows this tile should occupy based on the tile's
+    // LineDurationMS vs the calibrated ms-per-row.  This prevents thin horizontal
+    // features (short-duration signals) from being compressed into a single row.
     int rowsToPush = 1;
+    if (m_wfLineDuration > 0 && m_wfMsPerRow > 0) {
+        rowsToPush = std::max(1, static_cast<int>(
+            std::round(static_cast<float>(m_wfLineDuration) / m_wfMsPerRow)));
+    }
 
     m_hasNativeWaterfall = true;
     m_lastNativeTileMs = QDateTime::currentMSecsSinceEpoch();
@@ -712,16 +720,32 @@ void SpectrumWidget::updateWaterfallRow(const QVector<float>& binsIntensity,
 
     QVector<QRgb> scanline(destWidth, qRgb(0, 0, 0));
     if (tileBw > 0) {
+        // Precompute the bin range each pixel column covers.
+        // Use peak-hold (max) when multiple bins map to one pixel so that
+        // narrow signals like CW tones stay sharp instead of being averaged away.
+        const double pixelBw = m_bandwidthMhz / destWidth;
+        const double binsPerPixel = pixelBw / tileBw;
+
         for (int x = 0; x < destWidth; ++x) {
-            const double freq = panStartMhz + (static_cast<double>(x) / destWidth) * m_bandwidthMhz;
-            const double binF = (freq - lowFreqMhz) / tileBw;
-            const int binIdx = static_cast<int>(binF);
-            if (binIdx >= 0 && binIdx < srcSize) {
-                // Linear interpolation between adjacent bins
-                const float frac = static_cast<float>(binF - binIdx);
-                const float i0 = binsIntensity[binIdx];
-                const float i1 = (binIdx + 1 < srcSize) ? binsIntensity[binIdx + 1] : i0;
-                scanline[x] = intensityToRgb(i0 + frac * (i1 - i0));
+            const double freqLo = panStartMhz + (static_cast<double>(x) / destWidth) * m_bandwidthMhz;
+            const double freqHi = freqLo + pixelBw;
+            const int binLo = static_cast<int>((freqLo - lowFreqMhz) / tileBw);
+            const int binHi = static_cast<int>((freqHi - lowFreqMhz) / tileBw);
+
+            if (binsPerPixel > 1.5) {
+                // Downsampling: multiple bins per pixel — take the peak
+                const int lo = std::max(binLo, 0);
+                const int hi = std::min(binHi, srcSize - 1);
+                if (lo <= hi) {
+                    float peak = binsIntensity[lo];
+                    for (int b = lo + 1; b <= hi; ++b)
+                        peak = std::max(peak, binsIntensity[b]);
+                    scanline[x] = intensityToRgb(peak);
+                }
+            } else {
+                // Upsampling or ~1:1: nearest-neighbor (no interpolation blur)
+                const int binIdx = std::clamp(binLo, 0, srcSize - 1);
+                scanline[x] = intensityToRgb(binsIntensity[binIdx]);
             }
         }
     }
@@ -1796,7 +1820,7 @@ void SpectrumWidget::initWaterfallPipeline()
     m_wfGpuTex = r->newTexture(QRhiTexture::RGBA8, QSize(m_wfGpuTexW, m_wfGpuTexH));
     m_wfGpuTex->create();
 
-    m_wfSampler = r->newSampler(QRhiSampler::Linear, QRhiSampler::Linear,
+    m_wfSampler = r->newSampler(QRhiSampler::Nearest, QRhiSampler::Nearest,
                                  QRhiSampler::None,
                                  QRhiSampler::ClampToEdge, QRhiSampler::Repeat);
     m_wfSampler->create();
@@ -2824,6 +2848,9 @@ void SpectrumWidget::drawWaterfall(QPainter& p, const QRect& r)
         p.fillRect(r, Qt::black);
         return;
     }
+
+    // Disable bilinear filtering — nearest-neighbor keeps waterfall edges sharp.
+    p.setRenderHint(QPainter::SmoothPixmapTransform, false);
 
     // Ring buffer rendering: m_wfWriteRow is the newest row.
     // Draw in two halves: [writeRow..end] then [0..writeRow)
