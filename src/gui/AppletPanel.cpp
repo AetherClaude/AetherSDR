@@ -262,10 +262,28 @@ AppletPanel::AppletPanel(QWidget* parent) : QWidget(parent)
     selectLayout->addLayout(rxCol, 1);
     sMeterLayout->addWidget(selectRow);
 
+    // Restore saved TX/RX meter selections (#809)
+    int txIdx = settings.value("SMeter_TxSelect", 0).toInt();
+    int rxIdx = settings.value("SMeter_RxSelect", 0).toInt();
+    if (txIdx >= 0 && txIdx < m_txSelect->count())
+        m_txSelect->setCurrentIndex(txIdx);
+    if (rxIdx >= 0 && rxIdx < m_rxSelect->count())
+        m_rxSelect->setCurrentIndex(rxIdx);
+
     connect(m_txSelect, &QComboBox::currentTextChanged,
             m_sMeter, &SMeterWidget::setTxMode);
     connect(m_rxSelect, &QComboBox::currentTextChanged,
             m_sMeter, &SMeterWidget::setRxMode);
+
+    // Persist TX/RX meter selections on change (#809)
+    connect(m_txSelect, &QComboBox::currentIndexChanged,
+            this, [](int idx) {
+        AppSettings::instance().setValue("SMeter_TxSelect", idx);
+    });
+    connect(m_rxSelect, &QComboBox::currentIndexChanged,
+            this, [](int idx) {
+        AppSettings::instance().setValue("SMeter_RxSelect", idx);
+    });
 
     root->addWidget(m_sMeterSection);
 
