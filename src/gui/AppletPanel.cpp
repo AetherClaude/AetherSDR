@@ -267,6 +267,49 @@ AppletPanel::AppletPanel(QWidget* parent) : QWidget(parent)
     connect(m_rxSelect, &QComboBox::currentTextChanged,
             m_sMeter, &SMeterWidget::setRxMode);
 
+    // ── Peak hold line controls ───────────────────────────────────────────
+    auto* peakRow = new QWidget(m_sMeterSection);
+    auto* peakLayout = new QHBoxLayout(peakRow);
+    peakLayout->setContentsMargins(4, 2, 4, 2);
+    peakLayout->setSpacing(6);
+
+    auto* peakBtn = new QPushButton("Peak Hold", peakRow);
+    peakBtn->setCheckable(true);
+    peakBtn->setChecked(settings.value("PeakHoldEnabled", "False") == "True");
+    peakBtn->setFixedHeight(20);
+    peakBtn->setStyleSheet(
+        "QPushButton { background: #1a1a2e; color: #8090a0; border: 1px solid #334; "
+        "border-radius: 3px; font-size: 10px; padding: 0 6px; } "
+        "QPushButton:checked { background: #0a3060; color: #00b4d8; border-color: #00b4d8; }");
+
+    auto* decayLabel = new QLabel("Decay", peakRow);
+    decayLabel->setStyleSheet(labelStyle);
+    auto* decayCombo = new GuardedComboBox(peakRow);
+    decayCombo->addItems({"Fast", "Medium", "Slow"});
+    decayCombo->setCurrentText(
+        settings.value("PeakDecayRate", "Medium").toString());
+    AetherSDR::applyComboStyle(decayCombo);
+
+    peakLayout->addWidget(peakBtn);
+    peakLayout->addWidget(decayLabel);
+    peakLayout->addWidget(decayCombo, 1);
+    sMeterLayout->addWidget(peakRow);
+
+    m_sMeter->setPeakHoldEnabled(peakBtn->isChecked());
+    m_sMeter->setPeakDecayRate(decayCombo->currentText());
+
+    connect(peakBtn, &QPushButton::toggled, this, [this](bool on) {
+        m_sMeter->setPeakHoldEnabled(on);
+        AppSettings::instance().setValue("PeakHoldEnabled", on ? "True" : "False");
+        AppSettings::instance().save();
+    });
+    connect(decayCombo, &QComboBox::currentTextChanged,
+            this, [this](const QString& rate) {
+        m_sMeter->setPeakDecayRate(rate);
+        AppSettings::instance().setValue("PeakDecayRate", rate);
+        AppSettings::instance().save();
+    });
+
     root->addWidget(m_sMeterSection);
 
     // ── Scrollable applet stack (drop-aware) ────────────────────────────────
