@@ -1275,6 +1275,14 @@ MainWindow::MainWindow(QWidget* parent)
     };
     connect(&m_radioModel, &RadioModel::ampStateChanged, this, updatePgxlStyle);
 
+    // Fallback: update AmpApplet OPERATE/STANDBY button from the radio API state
+    // so the button appears even when the direct PGXL TCP connection is unavailable
+    // (e.g. remote/VPN operation where the PGXL LAN IP is not routable).
+    connect(&m_radioModel, &RadioModel::ampStateChanged, this, [this]() {
+        m_appletPanel->ampApplet()->setState(
+            m_radioModel.ampOperate() ? "OPERATE" : "STANDBY");
+    });
+
     connect(&m_radioModel, &RadioModel::amplifierChanged, this, [this, updatePgxlStyle](bool present) {
         m_pgxlIndicator->setVisible(present);
         m_appletPanel->setAmpVisible(present);
