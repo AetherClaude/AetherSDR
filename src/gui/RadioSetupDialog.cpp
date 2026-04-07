@@ -1345,7 +1345,7 @@ QWidget* RadioSetupDialog::buildAudioTab()
         auto* compLayout = new QHBoxLayout(compGroup);
         compLayout->setSpacing(4);
 
-        QString current = AppSettings::instance().value("AudioCompression", "None").toString();
+        QString current = AppSettings::instance().value("AudioCompression", "Auto").toString();
 
         const QString btnStyle =
             "QPushButton { background: #1a2a3a; color: #c8d8e8; border: 1px solid #304050; "

@@ -364,7 +364,7 @@ void RadioModel::setTransmit(bool tx)
 
 QString RadioModel::audioCompressionParam() const
 {
-    QString setting = AppSettings::instance().value("AudioCompression", "None").toString();
+    QString setting = AppSettings::instance().value("AudioCompression", "Auto").toString();
     if (setting == "Opus") return "opus";
     if (setting == "None") return "none";
     // Auto: use Opus on WAN, uncompressed on LAN
