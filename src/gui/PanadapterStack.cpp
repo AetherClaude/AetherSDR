@@ -1,6 +1,8 @@
 #include "PanadapterStack.h"
+#include "FloatingAppletWindow.h"
 #include "PanadapterApplet.h"
 #include "SpectrumWidget.h"
+#include "core/AppSettings.h"
 
 #include <QVBoxLayout>
 #include <QTimer>
@@ -50,6 +52,10 @@ PanadapterApplet* PanadapterStack::addPanadapter(const QString& panId)
 
 void PanadapterStack::removePanadapter(const QString& panId)
 {
+    // Auto-dock if floating before removing
+    if (m_floatingWindows.contains(panId))
+        dockPanadapter(panId);
+
     auto* applet = m_pans.take(panId);
     if (!applet) return;
 
@@ -133,6 +139,9 @@ void PanadapterStack::equalizeSizes()
 
 void PanadapterStack::rearrangeLayout(const QString& layoutId)
 {
+    // Auto-dock all floating pans before rebuilding the splitter layout
+    dockAll();
+
     // Collect applets in order
     QList<PanadapterApplet*> applets = m_pans.values();
     if (applets.isEmpty()) return;
@@ -215,6 +224,12 @@ void PanadapterStack::rearrangeLayout(const QString& layoutId)
 
 void PanadapterStack::removeAll()
 {
+    // Close all floating windows first
+    for (auto* win : m_floatingWindows)
+        delete win;
+    m_floatingWindows.clear();
+    m_floatSplitterIndex.clear();
+
     qDeleteAll(m_pans);
     m_pans.clear();
     m_activePanId.clear();
@@ -366,6 +381,85 @@ void PanadapterStack::applyLayout(const QString& layoutId, const QStringList& pa
         addPanadapter(panIds[2]);
         addPanadapter(panIds[3]);
     }
+}
+
+void PanadapterStack::floatPanadapter(const QString& panId)
+{
+    auto* applet = m_pans.value(panId);
+    if (!applet || m_floatingWindows.contains(panId)) return;
+
+    // Save the current splitter index for re-insertion on dock
+    m_floatSplitterIndex[panId] = m_splitter->indexOf(applet);
+
+    // Reparent applet out of the splitter
+    applet->setParent(nullptr);
+
+    // Build a human-readable title from the pan's title label
+    QString title = applet->property("sliceTitle").toString();
+    if (title.isEmpty()) title = QStringLiteral("Panadapter %1").arg(panId);
+
+    // Create floating window (pass 'this' as parent → Qt::Tool window)
+    auto* win = new FloatingAppletWindow(panId, title, applet, this);
+    m_floatingWindows[panId] = win;
+    applet->setFloating(true);
+
+    connect(win, &FloatingAppletWindow::dockRequested,
+            this, &PanadapterStack::dockPanadapter);
+
+    win->show();
+    QTimer::singleShot(50, win, [win]() { win->restoreGeometry(); });
+
+    // Persist floating state
+    auto& s = AppSettings::instance();
+    s.setValue(QStringLiteral("FloatingPan_%1_IsFloating").arg(panId), "True");
+    s.save();
+}
+
+void PanadapterStack::dockPanadapter(const QString& panId)
+{
+    if (!m_floatingWindows.contains(panId)) return;
+
+    auto* applet = m_pans.value(panId);
+    auto* win = m_floatingWindows.value(panId);
+
+    if (applet) {
+        // Reparent back into the splitter
+        applet->setParent(m_splitter);
+
+        // Re-insert at original position or append at end
+        int targetIdx = m_floatSplitterIndex.value(panId, m_splitter->count());
+        if (targetIdx > m_splitter->count()) targetIdx = m_splitter->count();
+        m_splitter->insertWidget(targetIdx, applet);
+        m_splitter->setStretchFactor(m_splitter->indexOf(applet), 1);
+
+        applet->setFloating(false);
+        applet->show();
+    }
+
+    // Clean up the floating window
+    if (win) {
+        win->saveGeometry();
+        win->hide();
+        win->deleteLater();
+    }
+    m_floatingWindows.remove(panId);
+    m_floatSplitterIndex.remove(panId);
+
+    // Persist floating state
+    auto& s = AppSettings::instance();
+    s.setValue(QStringLiteral("FloatingPan_%1_IsFloating").arg(panId), "False");
+    s.save();
+
+    // Re-equalize after docking
+    if (m_splitter->count() > 1)
+        QTimer::singleShot(0, this, [this]() { equalizeSizes(); });
+}
+
+void PanadapterStack::dockAll()
+{
+    const QStringList ids = m_floatingWindows.keys();
+    for (const QString& id : ids)
+        dockPanadapter(id);
 }
 
 } // namespace AetherSDR

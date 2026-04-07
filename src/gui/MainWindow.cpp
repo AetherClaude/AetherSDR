@@ -938,6 +938,15 @@ MainWindow::MainWindow(QWidget* parent)
                         if (pan->panStreamId())
                             m_radioModel.panStream()->setYPixels(pan->panStreamId(), ypix);
                     }
+                    // Restore previously-floating pans (#920)
+                    auto& s = AppSettings::instance();
+                    for (auto* applet : m_panStack->allApplets()) {
+                        const QString key = QStringLiteral("FloatingPan_%1_IsFloating").arg(applet->panId());
+                        if (s.value(key, "False").toString() == "True")
+                            QTimer::singleShot(0, this, [this, id = applet->panId()]() {
+                                m_panStack->floatPanadapter(id);
+                            });
+                    }
                 });
             });
         }
@@ -4814,6 +4823,12 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
         if (m_panStack->count() <= 1) return;
         m_radioModel.sendCommand(QString("display pan remove %1").arg(panId));
     });
+
+    // ── Pop out / dock: float pan into its own window or dock back ───────
+    connect(applet, &PanadapterApplet::popOutRequested,
+            m_panStack, &PanadapterStack::floatPanadapter);
+    connect(applet, &PanadapterApplet::dockRequested,
+            m_panStack, &PanadapterStack::dockPanadapter);
 
     // ── User drag actions from spectrum → radio (per-pan) ──────────────────
     connect(sw, &SpectrumWidget::bandwidthChangeRequested,

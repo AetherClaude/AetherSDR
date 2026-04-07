@@ -31,6 +31,10 @@ public:
     void setSliceId(int id);
     void clearSliceTitle();
 
+    // Float/dock state
+    bool isFloating() const { return m_floating; }
+    void setFloating(bool floating);
+
     // CW decode panel
     void setCwPanelVisible(bool visible);
     void appendCwText(const QString& text, float cost = 0.0f);
@@ -44,15 +48,21 @@ public:
 signals:
     void activated(const QString& panId);
     void closeRequested(const QString& panId);
+    void popOutRequested(const QString& panId);
+    void dockRequested(const QString& panId);
     void pitchRangeChanged(int minHz, int maxHz);
 
 protected:
     bool eventFilter(QObject* obj, QEvent* ev) override;
+    void contextMenuEvent(QContextMenuEvent* ev) override;
 
 private:
     QString m_panId;
+    bool m_floating{false};
     SpectrumWidget* m_spectrum{nullptr};
     QLabel*         m_titleLabel{nullptr};
+    QPushButton*    m_popOutBtn{nullptr};
+    QWidget*        m_titleBar{nullptr};
 
     // CW decode
     QWidget*   m_cwPanel{nullptr};

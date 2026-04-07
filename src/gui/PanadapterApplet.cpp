@@ -10,6 +10,8 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QTextEdit>
+#include <QMenu>
+#include <QContextMenuEvent>
 
 namespace AetherSDR {
 
@@ -21,14 +23,14 @@ PanadapterApplet::PanadapterApplet(QWidget* parent)
     layout->setSpacing(0);
 
     // ── Title bar (16px gradient, matching applet style) ─────────────────
-    auto* titleBar = new QWidget;
-    titleBar->setFixedHeight(16);
-    titleBar->setStyleSheet(
+    m_titleBar = new QWidget;
+    m_titleBar->setFixedHeight(16);
+    m_titleBar->setStyleSheet(
         "QWidget { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         "stop:0 #3a4a5a, stop:0.5 #2a3a4a, stop:1 #1a2a38); "
         "border-bottom: 1px solid #0a1a28; }");
 
-    auto* barLayout = new QHBoxLayout(titleBar);
+    auto* barLayout = new QHBoxLayout(m_titleBar);
     barLayout->setContentsMargins(6, 1, 4, 1);
     barLayout->setSpacing(2);
 
@@ -43,6 +45,19 @@ PanadapterApplet::PanadapterApplet(QWidget* parent)
         "border: none; font-size: 9px; padding: 0; }"
         "QPushButton:hover { color: #c8d8e8; }");
 
+    // Pop-out / dock button (↗ when docked, ↙ when floating)
+    m_popOutBtn = new QPushButton(QStringLiteral("\u2197"));
+    m_popOutBtn->setFixedSize(14, 14);
+    m_popOutBtn->setToolTip("Pop out to floating window");
+    m_popOutBtn->setStyleSheet(btnStyle);
+    connect(m_popOutBtn, &QPushButton::clicked, this, [this]() {
+        if (m_floating)
+            emit dockRequested(m_panId);
+        else
+            emit popOutRequested(m_panId);
+    });
+    barLayout->addWidget(m_popOutBtn);
+
     auto* closeBtn = new QPushButton("\u00D7");
     closeBtn->setFixedSize(14, 14);
     closeBtn->setStyleSheet(btnStyle + "QPushButton:hover { color: #ff4040; }");
@@ -51,7 +66,7 @@ PanadapterApplet::PanadapterApplet(QWidget* parent)
     });
     barLayout->addWidget(closeBtn);
 
-    layout->addWidget(titleBar);
+    layout->addWidget(m_titleBar);
 
     // ── Spectrum widget (FFT + waterfall) ────────────────────────────────
     m_spectrum = new SpectrumWidget(this);
@@ -271,11 +286,38 @@ void PanadapterApplet::clearCwText()
     m_cwText->clear();
 }
 
+void PanadapterApplet::setFloating(bool floating)
+{
+    m_floating = floating;
+    m_popOutBtn->setText(floating ? QStringLiteral("\u2199") : QStringLiteral("\u2197"));
+    m_popOutBtn->setToolTip(floating ? "Dock back into main window" : "Pop out to floating window");
+}
+
 bool PanadapterApplet::eventFilter(QObject* obj, QEvent* ev)
 {
     if (ev->type() == QEvent::MouseButtonPress)
         emit activated(m_panId);
     return QWidget::eventFilter(obj, ev);
+}
+
+void PanadapterApplet::contextMenuEvent(QContextMenuEvent* ev)
+{
+    // Only show on title bar area
+    if (!m_titleBar->geometry().contains(ev->pos())) {
+        QWidget::contextMenuEvent(ev);
+        return;
+    }
+    auto* menu = new QMenu(this);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    QAction* act = menu->addAction(m_floating ? QStringLiteral("\u21a9 Dock")
+                                              : QStringLiteral("\u2197 Pop out"));
+    connect(act, &QAction::triggered, this, [this]() {
+        if (m_floating)
+            emit dockRequested(m_panId);
+        else
+            emit popOutRequested(m_panId);
+    });
+    menu->popup(ev->globalPos());
 }
 
 } // namespace AetherSDR
