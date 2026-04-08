@@ -44,6 +44,7 @@ public:
 signals:
     void activated(const QString& panId);
     void closeRequested(const QString& panId);
+    void popOutRequested(const QString& panId);
     void pitchRangeChanged(int minHz, int maxHz);
 
 protected:

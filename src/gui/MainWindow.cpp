@@ -864,6 +864,8 @@ MainWindow::MainWindow(QWidget* parent)
         }
         setActivePanApplet(applet);
         wirePanadapter(applet);
+        // Restore persisted pop-out state for this pan (#1002)
+        m_panStack->restoreFloatState(pan->panId());
         connect(pan, &PanadapterModel::infoChanged,
                 applet->spectrumWidget(), &SpectrumWidget::setFrequencyRange);
         connect(pan, &PanadapterModel::levelChanged,

@@ -6,6 +6,7 @@
 
 namespace AetherSDR {
 
+class FloatingAppletWindow;
 class PanadapterApplet;
 class SpectrumWidget;
 
@@ -44,6 +45,13 @@ public:
     void equalizeSizes();
     void rearrangeLayout(const QString& layoutId);
 
+    // Pop-out / dock individual panadapters into floating windows (#1002)
+    void floatPan(const QString& panId);
+    void dockPan(const QString& panId);
+    bool isPanFloating(const QString& panId) const;
+    // Call after addPanadapter to restore persisted float state
+    void restoreFloatState(const QString& panId);
+
 signals:
     void activePanChanged(const QString& panId);
 
@@ -51,6 +59,7 @@ private:
     QSplitter* m_splitter{nullptr};
     QMap<QString, PanadapterApplet*> m_pans;
     QString m_activePanId;
+    QMap<QString, FloatingAppletWindow*> m_floatingWindows;
 };
 
 } // namespace AetherSDR

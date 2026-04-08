@@ -43,6 +43,15 @@ PanadapterApplet::PanadapterApplet(QWidget* parent)
         "border: none; font-size: 9px; padding: 0; }"
         "QPushButton:hover { color: #c8d8e8; }");
 
+    auto* popOutBtn = new QPushButton("\u2922");  // ⤢ diagonal arrows = pop-out
+    popOutBtn->setFixedSize(14, 14);
+    popOutBtn->setToolTip("Pop out to floating window");
+    popOutBtn->setStyleSheet(btnStyle);
+    connect(popOutBtn, &QPushButton::clicked, this, [this]() {
+        emit popOutRequested(m_panId);
+    });
+    barLayout->addWidget(popOutBtn);
+
     auto* closeBtn = new QPushButton("\u00D7");
     closeBtn->setFixedSize(14, 14);
     closeBtn->setStyleSheet(btnStyle + "QPushButton:hover { color: #ff4040; }");

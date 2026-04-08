@@ -1,6 +1,8 @@
 #include "PanadapterStack.h"
 #include "PanadapterApplet.h"
+#include "FloatingAppletWindow.h"
 #include "SpectrumWidget.h"
+#include "core/AppSettings.h"
 
 #include <QVBoxLayout>
 #include <QTimer>
@@ -29,6 +31,8 @@ PanadapterApplet* PanadapterStack::addPanadapter(const QString& panId)
     applet->setPanId(panId);
     applet->spectrumWidget()->setPanIndex(m_pans.size());
     applet->spectrumWidget()->loadSettings();
+    connect(applet, &PanadapterApplet::popOutRequested,
+            this, &PanadapterStack::floatPan);
     m_splitter->addWidget(applet);
 
     // Equal stretch for all pans
@@ -50,6 +54,13 @@ PanadapterApplet* PanadapterStack::addPanadapter(const QString& panId)
 
 void PanadapterStack::removePanadapter(const QString& panId)
 {
+    // If the pan is floating, close its window first so the applet is
+    // safely reparented before we delete it.
+    if (auto* win = m_floatingWindows.take(panId)) {
+        win->hideAndSave();
+        win->deleteLater();
+    }
+
     auto* applet = m_pans.take(panId);
     if (!applet) return;
 
@@ -213,8 +224,97 @@ void PanadapterStack::rearrangeLayout(const QString& layoutId)
     QTimer::singleShot(0, this, [this]() { equalizeSizes(); });
 }
 
+// ── Settings key helpers for per-pan float persistence ──────────────────────
+
+static QString panFloatKey(const QString& panId)
+{
+    // e.g. "FloatingPan_0x40000000_IsFloating"
+    return QStringLiteral("FloatingPan_%1_IsFloating").arg(panId);
+}
+
+static QString panFloatWindowId(const QString& panId)
+{
+    // ID passed to FloatingAppletWindow — drives geometry save keys
+    return QStringLiteral("Pan/") + panId;
+}
+
+void PanadapterStack::floatPan(const QString& panId)
+{
+    auto* applet = m_pans.value(panId, nullptr);
+    if (!applet || m_floatingWindows.contains(panId)) return;
+
+    // Detach from splitter by reparenting; Qt removes it from the splitter
+    applet->setParent(nullptr);
+
+    const QString title = QStringLiteral("Pan %1").arg(panId);
+    auto* win = new FloatingAppletWindow(panFloatWindowId(panId), title, applet, this);
+    m_floatingWindows[panId] = win;
+
+    connect(win, &FloatingAppletWindow::dockRequested, this, [this](const QString& windowId) {
+        // windowId is "Pan/<panId>" — strip prefix
+        const QString pid = windowId.mid(4);  // strip "Pan/"
+        dockPan(pid);
+    });
+
+    win->showAndRestore();
+
+    AppSettings::instance().setValue(panFloatKey(panId), "True");
+    AppSettings::instance().save();
+}
+
+void PanadapterStack::dockPan(const QString& panId)
+{
+    FloatingAppletWindow* win = m_floatingWindows.value(panId, nullptr);
+    if (!win) return;
+
+    // Retrieve the applet widget from the floating window's content layout
+    QWidget* appletWidget = nullptr;
+    if (auto* rootLayout = qobject_cast<QVBoxLayout*>(win->layout())) {
+        if (auto* contentItem = rootLayout->itemAt(1)) {
+            if (auto* contentLayout = contentItem->layout()) {
+                if (contentLayout->count() > 0) {
+                    if (auto* item = contentLayout->itemAt(0))
+                        appletWidget = item->widget();
+                }
+            }
+        }
+    }
+
+    if (appletWidget) {
+        appletWidget->setParent(m_splitter);
+        m_splitter->addWidget(appletWidget);
+        appletWidget->show();
+    }
+
+    win->hideAndSave();
+    win->deleteLater();
+    m_floatingWindows.remove(panId);
+
+    AppSettings::instance().setValue(panFloatKey(panId), "False");
+    AppSettings::instance().save();
+}
+
+bool PanadapterStack::isPanFloating(const QString& panId) const
+{
+    return m_floatingWindows.contains(panId);
+}
+
+void PanadapterStack::restoreFloatState(const QString& panId)
+{
+    const QString val = AppSettings::instance().value(panFloatKey(panId)).toString();
+    if (val.compare("True", Qt::CaseInsensitive) == 0)
+        QTimer::singleShot(0, this, [this, panId]() { floatPan(panId); });
+}
+
 void PanadapterStack::removeAll()
 {
+    // Close all floating windows before deleting applets
+    for (auto* win : m_floatingWindows) {
+        win->hideAndSave();
+        win->deleteLater();
+    }
+    m_floatingWindows.clear();
+
     qDeleteAll(m_pans);
     m_pans.clear();
     m_activePanId.clear();
