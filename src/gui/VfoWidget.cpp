@@ -319,17 +319,6 @@ void VfoWidget::buildUI()
 
     root->addLayout(hdr);
 
-#ifdef HAVE_RADE
-    // ── RADE modem status indicator (hidden until RADE mode activated) ────
-    m_radeStatusLabel = new QLabel;
-    m_radeStatusLabel->setFixedHeight(16);
-    m_radeStatusLabel->setTextFormat(Qt::RichText);
-    m_radeStatusLabel->setStyleSheet(
-        "QLabel { color: #00b4d8; font-size: 10px; font-weight: bold;"
-        " background: transparent; border: none; padding: 0; margin: 0; }");
-    m_radeStatusLabel->hide();
-    root->addWidget(m_radeStatusLabel);
-#endif
 
     // Close and lock buttons — children of our parent (SpectrumWidget) so they
     // can render outside our bounds. Lifecycle managed by VfoWidget destructor.
@@ -489,7 +478,25 @@ void VfoWidget::buildUI()
         m_freqStack->setCurrentIndex(0);
     });
 
-    root->addWidget(m_freqStack, 0, Qt::AlignRight);
+    // ── Frequency row: [RADE label] [stretch] [frequency] ────────────────
+    {
+        auto* freqRow = new QHBoxLayout;
+        freqRow->setContentsMargins(0, 0, 0, 0);
+        freqRow->setSpacing(4);
+#ifdef HAVE_RADE
+        m_radeStatusLabel = new QLabel;
+        m_radeStatusLabel->setFixedHeight(16);
+        m_radeStatusLabel->setTextFormat(Qt::RichText);
+        m_radeStatusLabel->setStyleSheet(
+            "QLabel { color: #00b4d8; font-size: 10px; font-weight: bold;"
+            " background: transparent; border: none; padding: 0; margin: 0; }");
+        m_radeStatusLabel->hide();
+        freqRow->addWidget(m_radeStatusLabel);
+#endif
+        freqRow->addStretch(1);
+        freqRow->addWidget(m_freqStack);
+        root->addLayout(freqRow);
+    }
 
     // ── S-meter + dBm row (75/25 split) ────────────────────────────────────
     // S-meter bar is painted in paintEvent; spacer reserves its space.
@@ -892,12 +899,17 @@ void VfoWidget::buildTabContent()
         m_bnrBtn->setAccessibleName("GPU neural denoising");
         m_nr4Btn  = makeDsp("NR4");
         m_nr4Btn->setAccessibleName("Spectral bleach noise reduction");
+        m_dfnrBtn = makeDsp("DFNR");
+        m_dfnrBtn->setAccessibleName("DeepFilterNet3 neural noise reduction");
         m_apfBtn->hide();  // only visible in CW mode
 #ifndef HAVE_BNR
         m_bnrBtn->hide();
 #endif
 #ifndef HAVE_SPECBLEACH
         m_nr4Btn->hide();
+#endif
+#ifndef HAVE_DFNR
+        m_dfnrBtn->hide();
 #endif
 
         // Initial layout: 4-column grid (APF hidden, BNR only with HAVE_BNR)
@@ -914,6 +926,7 @@ void VfoWidget::buildTabContent()
         m_dspGrid->addWidget(m_anftBtn, 2, 2);
         m_dspGrid->addWidget(m_bnrBtn,  2, 3);
         m_dspGrid->addWidget(m_nr4Btn,  3, 0);
+        m_dspGrid->addWidget(m_dfnrBtn, 3, 1);
         dspVb->addLayout(m_dspGrid);
 
         // DSP button tooltips
@@ -931,6 +944,7 @@ void VfoWidget::buildTabContent()
         m_anftBtn->setToolTip("FFT-based notch filter \u2014 removes up to five persistent tones from transformers or power supplies.");
         m_bnrBtn->setToolTip("NVIDIA GPU-accelerated neural audio denoising. Requires NVIDIA RTX 4000+ with Docker.");
         m_nr4Btn->setToolTip("Client-side spectral bleach noise reduction (libspecbleach). Right-click for NR4 settings.");
+        m_dfnrBtn->setToolTip("DeepFilterNet3 neural noise reduction \u2014 AI speech enhancement\nwith higher fidelity than RNNoise in high-noise environments.\nCPU-only, 10 ms latency. Right-click for DFNR settings.");
 
         // DSP button accessible names (#870)
         // Accessible names set inline after each widget creation below (#870)
@@ -1328,6 +1342,11 @@ void VfoWidget::buildTabContent()
         m_nr4Btn->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(m_nr4Btn, &QPushButton::customContextMenuRequested, this, [this](const QPoint& pos) {
             emit nr4RightClicked(m_nr4Btn->mapToGlobal(pos));
+        });
+        connect(m_dfnrBtn, &QPushButton::toggled, this, [this](bool on) { if (!m_updatingFromModel) emit dfnrToggled(on); });
+        m_dfnrBtn->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(m_dfnrBtn, &QPushButton::customContextMenuRequested, this, [this](const QPoint& pos) {
+            emit dfnrRightClicked(m_dfnrBtn->mapToGlobal(pos));
         });
         connect(m_nrfBtn,  &QPushButton::toggled, this, [this](bool on) { if (!m_updatingFromModel && m_slice) m_slice->setNrf(on); });
         connect(m_anflBtn, &QPushButton::toggled, this, [this](bool on) { if (!m_updatingFromModel && m_slice) m_slice->setAnfl(on); });
@@ -1880,6 +1899,7 @@ void VfoWidget::setSlice(SliceModel* slice)
     connect(m_slice, &SliceModel::frequencyChanged, this, [this](double) { updateFreqLabel(); });
     // Mode list (dynamic from radio)
     connect(m_slice, &SliceModel::modeListChanged, this, [this](const QStringList& modes) {
+        if (modes.isEmpty()) return;          // keep static fallback list (#891)
         QSignalBlocker sb(m_modeCombo);
         QString cur = m_modeCombo->currentText();
         m_modeCombo->clear();
@@ -1966,6 +1986,9 @@ void VfoWidget::setSlice(SliceModel* slice)
 #endif
 #ifdef HAVE_SPECBLEACH
         m_nr4Btn->setVisible(!isFm);
+#endif
+#ifdef HAVE_DFNR
+        m_dfnrBtn->setVisible(!isFm);
 #endif
         m_nrfBtn->setVisible(!isFm);
         relayoutDspGrid();
@@ -2408,6 +2431,9 @@ void VfoWidget::syncFromSlice()
 #ifdef HAVE_SPECBLEACH
     m_nr4Btn->setVisible(!isFm);
 #endif
+#ifdef HAVE_DFNR
+    m_dfnrBtn->setVisible(!isFm);
+#endif
     m_nrlBtn->setVisible(!isFm);
     m_nrsBtn->setVisible(!isFm);
     m_nrfBtn->setVisible(!isFm);
@@ -2471,9 +2497,9 @@ void VfoWidget::updateFilterLabel()
     if (!m_slice) return;
     const QString& mode = m_slice->mode();
     int w;
-    if (mode == "USB" || mode == "DIGU" || mode == "FDV")
+    if (mode == "USB" || mode == "FDV")
         w = m_slice->filterHigh();
-    else if (mode == "LSB" || mode == "DIGL")
+    else if (mode == "LSB")
         w = std::abs(m_slice->filterLow());
     else
         w = m_slice->filterHigh() - m_slice->filterLow();
@@ -2487,7 +2513,7 @@ void VfoWidget::relayoutDspGrid()
 {
     // Remove all widgets from the grid (without deleting them)
     QPushButton* all[] = {m_nrBtn, m_nr2Btn, m_nbBtn, m_anfBtn, m_apfBtn, m_nrlBtn,
-                          m_nrsBtn, m_rnnBtn, m_rn2Btn, m_nrfBtn, m_anflBtn, m_anftBtn, m_bnrBtn, m_nr4Btn};
+                          m_nrsBtn, m_rnnBtn, m_rn2Btn, m_nrfBtn, m_anflBtn, m_anftBtn, m_bnrBtn, m_nr4Btn, m_dfnrBtn};
     for (auto* btn : all)
         m_dspGrid->removeWidget(btn);
 
