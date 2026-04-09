@@ -212,6 +212,7 @@ void SpectrumWidget::loadSettings()
         m_bandPlanFontSize = s.value("BandPlanFontSize", "6").toInt();
     }
     m_fftHeatMap     = s.value(settingsKey("DisplayFftHeatMap"), "True").toString() == "True";
+    m_showGrid       = s.value(settingsKey("DisplayShowGrid"), "True").toString() == "True";
     m_wfColorScheme  = static_cast<WfColorScheme>(
         std::clamp(s.value(settingsKey("DisplayWfColorScheme"), "0").toInt(),
                    0, static_cast<int>(WfColorScheme::Count) - 1));
@@ -228,7 +229,7 @@ void SpectrumWidget::loadSettings()
         m_overlayMenu->syncDisplaySettings(m_fftAverage, m_fftFps,
             static_cast<int>(m_fftFillAlpha * 100), m_fftWeightedAvg, m_fftFillColor,
             m_wfColorGain, m_wfBlackLevel, m_wfAutoBlack, m_wfLineDuration,
-            75, false, m_fftHeatMap, static_cast<int>(m_wfColorScheme));
+            75, false, m_fftHeatMap, static_cast<int>(m_wfColorScheme), m_showGrid);
 }
 
 VfoWidget* SpectrumWidget::addVfoWidget(int sliceId)
@@ -293,6 +294,13 @@ void SpectrumWidget::setFftHeatMap(bool on) {
     auto& s = AppSettings::instance();
     s.setValue(settingsKey("DisplayFftHeatMap"), on ? "True" : "False");
     s.save();
+}
+void SpectrumWidget::setShowGrid(bool on) {
+    m_showGrid = on;
+    auto& s = AppSettings::instance();
+    s.setValue(settingsKey("DisplayShowGrid"), on ? "True" : "False");
+    s.save();
+    markOverlayDirty();
 }
 void SpectrumWidget::setFftFillAlpha(float a) {
     m_fftFillAlpha = std::clamp(a, 0.0f, 1.0f);
@@ -2185,24 +2193,32 @@ void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb)
             drawSliceMarkers(p, specRect, wfRect);
             drawOffScreenSlices(p, specRect);
 
-            // WNB / RF gain indicators (horizontal, top-left of spectrum)
-            if (m_wnbActive || m_rfGainValue != 0) {
-                QFont indFont(p.font().family(), 14, QFont::Bold);
-                p.setFont(indFont);
-                p.setPen(QColor(0xc8, 0xd8, 0xe8, 180));
-                const QFontMetrics fm(indFont);
-                int y = specRect.top() + fm.ascent() + 4;
-                // Build combined label, measure, and right-align
-                QString label;
-                if (m_wnbActive)
-                    label += QStringLiteral("WNB");
-                if (m_rfGainValue != 0) {
-                    if (!label.isEmpty()) label += QStringLiteral("   ");
-                    label += QStringLiteral("%1%2 dB")
-                        .arg(m_rfGainValue > 0 ? "+" : "").arg(m_rfGainValue);
+            // WNB / RF gain / Prop forecast indicators (top-right of spectrum)
+            {
+                const bool showProp = m_propForecastVisible && m_propKIndex >= 0 && m_propSfi > 0;
+                if (m_wnbActive || m_rfGainValue != 0 || showProp) {
+                    QFont indFont(p.font().family(), 14, QFont::Bold);
+                    p.setFont(indFont);
+                    p.setPen(QColor(0xc8, 0xd8, 0xe8, 180));
+                    const QFontMetrics fm(indFont);
+                    int y = specRect.top() + fm.ascent() + 4;
+                    // Build combined label (left to right: prop, WNB, RF gain), right-align
+                    QString label;
+                    if (showProp) {
+                        label += QString("K%1  SFI %2").arg(m_propKIndex).arg(m_propSfi);
+                    }
+                    if (m_wnbActive) {
+                        if (!label.isEmpty()) { label += QStringLiteral("   "); }
+                        label += QStringLiteral("WNB");
+                    }
+                    if (m_rfGainValue != 0) {
+                        if (!label.isEmpty()) { label += QStringLiteral("   "); }
+                        label += QStringLiteral("%1%2 dB")
+                            .arg(m_rfGainValue > 0 ? "+" : "").arg(m_rfGainValue);
+                    }
+                    int x = specRect.right() - DBM_STRIP_W - 8 - fm.horizontalAdvance(label);
+                    p.drawText(x, y, label);
                 }
-                int x = specRect.right() - DBM_STRIP_W - 8 - fm.horizontalAdvance(label);
-                p.drawText(x, y, label);
             }
 
             // Cursor frequency label (#726)
@@ -2688,36 +2704,48 @@ void SpectrumWidget::paintEvent(QPaintEvent* ev)
         m_overlayMenu->raiseAll();
     }
 
-    // ── WNB / RF Gain indicators (top-right of FFT area) ──────────────────
-    if (m_wnbActive || m_rfGainValue != 0) {
-        QFont indFont = p.font();
-        indFont.setPointSize(18);
-        indFont.setBold(true);
-        p.setFont(indFont);
-        p.setPen(QColor(255, 255, 255, 84));
+    // ── WNB / RF Gain / Prop Forecast indicators (top-right of FFT area) ────
+    {
+        const bool showProp = m_propForecastVisible && m_propKIndex >= 0 && m_propSfi > 0;
+        if (m_wnbActive || m_rfGainValue != 0 || showProp) {
+            QFont indFont = p.font();
+            indFont.setPointSize(18);
+            indFont.setBold(true);
+            p.setFont(indFont);
+            p.setPen(QColor(255, 255, 255, 84));
 
-        const QFontMetrics fm(indFont);
-        const int rightEdge = specRect.right() - DBM_STRIP_W - 6;
-        const int topY = specRect.top() + fm.ascent() + 2;
+            const QFontMetrics fm(indFont);
+            const int rightEdge = specRect.right() - DBM_STRIP_W - 6;
+            const int topY = specRect.top() + fm.ascent() + 2;
 
-        int x = rightEdge;
+            int x = rightEdge;
 
-        // RF Gain (rightmost)
-        if (m_rfGainValue != 0) {
-            QString gainStr = (m_rfGainValue > 0)
-                ? QString("+%1dB").arg(m_rfGainValue)
-                : QString("%1dB").arg(m_rfGainValue);
-            int gw = fm.horizontalAdvance(gainStr);
-            x -= gw;
-            p.drawText(x, topY, gainStr);
-            x -= 10;  // gap between labels
-        }
+            // RF Gain (rightmost)
+            if (m_rfGainValue != 0) {
+                QString gainStr = (m_rfGainValue > 0)
+                    ? QString("+%1dB").arg(m_rfGainValue)
+                    : QString("%1dB").arg(m_rfGainValue);
+                int gw = fm.horizontalAdvance(gainStr);
+                x -= gw;
+                p.drawText(x, topY, gainStr);
+                x -= 10;  // gap between labels
+            }
 
-        // WNB (to the left of RF Gain)
-        if (m_wnbActive) {
-            int ww = fm.horizontalAdvance("WNB");
-            x -= ww;
-            p.drawText(x, topY, "WNB");
+            // WNB (to the left of RF Gain)
+            if (m_wnbActive) {
+                int ww = fm.horizontalAdvance("WNB");
+                x -= ww;
+                p.drawText(x, topY, "WNB");
+                x -= 10;
+            }
+
+            // Prop forecast (leftmost: "K3  SFI 110")
+            if (showProp) {
+                QString propStr = QString("K%1  SFI %2").arg(m_propKIndex).arg(m_propSfi);
+                int pw = fm.horizontalAdvance(propStr);
+                x -= pw;
+                p.drawText(x, topY, propStr);
+            }
         }
     }
 
@@ -2751,6 +2779,7 @@ void SpectrumWidget::paintEvent(QPaintEvent* ev)
 
 void SpectrumWidget::drawGrid(QPainter& p, const QRect& r)
 {
+    if (!m_showGrid) return;
     const int w = r.width();
     const int h = r.height();
 

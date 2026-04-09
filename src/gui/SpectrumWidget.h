@@ -133,6 +133,12 @@ public:
     void setWnbActive(bool on) { m_wnbActive = on; markOverlayDirty(); }
     void setRfGain(int gain) { m_rfGainValue = gain; markOverlayDirty(); }
 
+    // HF propagation forecast overlay (K-index and Solar Flux Index).
+    // Values of -1 mean not yet fetched; visible only when enabled.
+    void setPropForecastVisible(bool on) { m_propForecastVisible = on; markOverlayDirty(); }
+    void setPropForecast(int kIndex, int sfi) { m_propKIndex = kIndex; m_propSfi = sfi; markOverlayDirty(); }
+    bool propForecastVisible() const { return m_propForecastVisible; }
+
     // NB Waterfall Blanker (#277) — client-side impulse suppression
     void setWfBlankerEnabled(bool on);
     void setWfBlankerThreshold(float t);
@@ -161,9 +167,11 @@ public:
     void setFftFillAlpha(float a);
     void setFftFillColor(const QColor& c);
     void setFftHeatMap(bool on);
+    void setShowGrid(bool on);
     float fftFillAlpha() const         { return m_fftFillAlpha; }
     QColor fftFillColor() const        { return m_fftFillColor; }
     bool fftHeatMap() const            { return m_fftHeatMap; }
+    bool showGrid() const              { return m_showGrid; }
     int   fftAverage() const           { return m_fftAverage; }
     int   fftFps() const               { return m_fftFps; }
     bool  fftWeightedAvg() const       { return m_fftWeightedAvg; }
@@ -384,6 +392,7 @@ private:
     float m_fftFillAlpha{0.70f};     // client-side fill opacity (0-1)
     QColor m_fftFillColor{0x00, 0xe5, 0xff};  // client-side fill color (default cyan)
     bool m_fftHeatMap{true};        // true = intensity heat map, false = solid color
+    bool m_showGrid{true};          // false = hide grid lines
 
     // ── Waterfall display controls (radio-side via "display panafall set") ─
     int   m_wfColorGain{50};         // 0-100, maps intensity to color range
@@ -445,6 +454,11 @@ private:
     // On-screen indicators (WNB, RF Gain)
     bool m_wnbActive{false};
     int  m_rfGainValue{0};
+
+    // HF propagation forecast overlay
+    bool m_propForecastVisible{false};
+    int  m_propKIndex{-1};
+    int  m_propSfi{-1};
 
     // Background image
     QImage  m_bgImage;

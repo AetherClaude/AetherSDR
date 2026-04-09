@@ -35,7 +35,11 @@ public:
                              const QColor& fillColor, int gain, int black,
                              bool autoBlack, int rate,
                              int floorPos = 75, bool floorEnable = false,
-                             bool heatMap = true, int colorScheme = 0);
+                             bool heatMap = true, int colorScheme = 0,
+                             bool showGrid = true);
+    // Sync blanker/cursor/opacity controls not covered by syncDisplaySettings.
+    void syncExtraDisplaySettings(bool blankerOn, float blankerThresh,
+                                  bool cursorFreq, int bgOpacity);
 
     // Set the panadapter ID this overlay belongs to (for +RX routing).
     void setPanId(const QString& id) { m_panId = id; }
@@ -54,6 +58,7 @@ public:
     QPushButton* dspRn2Button() const;
     QPushButton* dspBnrButton() const;
     QPushButton* dspNr4Button() const;
+    QPushButton* dspDfnrButton() const;
     QPushButton* cursorFreqButton() const { return m_cursorFreqBtn; }
 
 protected:
@@ -72,9 +77,11 @@ signals:
     void rn2Toggled(bool on);
     void bnrToggled(bool on);
     void nr4Toggled(bool on);
+    void dfnrToggled(bool on);
     void bnrIntensityChanged(float ratio);
     void nr2RightClicked(const QPoint& globalPos);
     void nr4RightClicked(const QPoint& globalPos);
+    void dfnrRightClicked(const QPoint& globalPos);
     // Display sub-panel signals
     void fftAverageChanged(int frames);
     void fftFpsChanged(int fps);
@@ -82,6 +89,7 @@ signals:
     void fftFillAlphaChanged(float alpha);
     void fftFillColorChanged(const QColor& color);
     void fftHeatMapChanged(bool on);
+    void showGridChanged(bool on);
     void wfColorGainChanged(int gain);
     void wfBlackLevelChanged(int level);
     void wfAutoBlackChanged(bool on);
@@ -106,6 +114,7 @@ signals:
     void backgroundImageRequested();
     void backgroundImageCleared();
     void backgroundOpacityChanged(int pct);
+    void displaySettingsReset();
 
 private:
     QString m_panId;
@@ -175,6 +184,7 @@ private:
     QPushButton* m_fillColorBtn{nullptr};
     QColor       m_fillColor{0x00, 0xe5, 0xff};  // default cyan
     QPushButton* m_heatMapBtn{nullptr};
+    QPushButton* m_showGridBtn{nullptr};
     QPushButton* m_weightedAvgBtn{nullptr};
     QSlider*     m_gainSlider{nullptr};
     QLabel*      m_gainLabel{nullptr};
