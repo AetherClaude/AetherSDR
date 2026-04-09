@@ -10,7 +10,7 @@
 
 AetherSDR brings FlexRadio operation to Linux without Wine or virtual machines. Built from the ground up with Qt6 and C++20, it speaks the SmartSDR protocol natively and aims to replicate the full SmartSDR experience.
 
-**Current version: 0.8.5** | [Download](https://github.com/ten9876/AetherSDR/releases/latest) | [Discussions](https://github.com/ten9876/AetherSDR/discussions) | [What's New](https://github.com/ten9876/AetherSDR/releases)
+**Current version: 0.8.7** | [Download](https://github.com/ten9876/AetherSDR/releases/latest) | [Discussions](https://github.com/ten9876/AetherSDR/discussions) | [What's New](https://github.com/ten9876/AetherSDR/releases)
 
 > **Cross-platform downloads available:** Linux AppImage, macOS universal DMG, Windows installer and portable ZIP.
 > Linux is the primary supported platform. macOS and Windows builds are provided as a courtesy.
@@ -120,6 +120,7 @@ brew install qt@6 ninja cmake pkgconf autoconf automake libtool \
 ```bash
 git clone https://github.com/ten9876/AetherSDR.git
 cd AetherSDR
+./setup-deepfilter.sh          # downloads libdeepfilter.a — required for DFNR noise reduction
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build -j$(nproc)
 ./build/AetherSDR
