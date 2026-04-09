@@ -47,6 +47,16 @@ ConnectionPanel::ConnectionPanel(QWidget* parent)
     m_lowBwCheck->setStyleSheet("QCheckBox { color: #8aa8c0; font-size: 11px; }");
     vbox->addWidget(m_lowBwCheck);
 
+    // Audio + CAT only checkbox (suppresses panadapter/waterfall data streams)
+    m_audioCatOnlyCheck = new QCheckBox("Audio + CAT Only", this);
+    m_audioCatOnlyCheck->setChecked(
+        AppSettings::instance().value("AudioCatOnly", "False").toString() == "True");
+    m_audioCatOnlyCheck->setToolTip("Suppresses panadapter/waterfall data streams.\n"
+                                    "Radio control and DAX audio operate normally.\n"
+                                    "Recommended for headless, remote-node, or metered links.");
+    m_audioCatOnlyCheck->setStyleSheet("QCheckBox { color: #8aa8c0; font-size: 11px; }");
+    vbox->addWidget(m_audioCatOnlyCheck);
+
     // Connect/disconnect button
     m_connectBtn = new QPushButton("Connect", this);
     m_connectBtn->setEnabled(false);
@@ -218,9 +228,10 @@ void ConnectionPanel::onConnectClicked()
         return;
     }
 
-    // Save low bandwidth preference before connecting
+    // Save connection preferences before connecting
     auto& s = AppSettings::instance();
     s.setValue("LowBandwidthConnect", m_lowBwCheck->isChecked() ? "True" : "False");
+    s.setValue("AudioCatOnly", m_audioCatOnlyCheck->isChecked() ? "True" : "False");
     s.save();
 
     // LAN radio

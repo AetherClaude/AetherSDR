@@ -53,6 +53,7 @@ private:
     QListWidget* m_radioList;
     QPushButton* m_connectBtn;
     QCheckBox*   m_lowBwCheck;
+    QCheckBox*   m_audioCatOnlyCheck;
     QLabel*      m_statusLabel;
     QWidget*     m_radioGroup;       // "Discovered Radios" group box
 
