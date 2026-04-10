@@ -154,6 +154,7 @@ public:
     void setVoxLevel(int level);
     void setVoxDelay(int delay);
     void setMicBoost(bool on);
+    void setMicBias(bool on);
     void setAmCarrierLevel(int level);
     void setDexp(bool on);
     void setDexpLevel(int level);
@@ -206,6 +207,7 @@ private:
     int     m_micLevel{50};
     bool    m_micAcc{false};
     bool    m_speechProcEnable{false};
+    bool    m_speechProcDirty{false};  // guard: ignore radio echoes for 2 s after optimistic update (#1104)
     int     m_speechProcLevel{0};
     bool    m_companderOn{false};
     int     m_companderLevel{0};

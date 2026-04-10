@@ -1,6 +1,7 @@
 #include "TransmitModel.h"
 #include "core/LogManager.h"
 #include <QDebug>
+#include <QTimer>
 
 namespace AetherSDR {
 
@@ -70,7 +71,9 @@ void TransmitModel::applyTransmitStatus(const QMap<QString, QString>& kvs)
         bool v = kvs["mic_acc"] == "1";
         if (m_micAcc != v) { m_micAcc = v; micChanged = true; }
     }
-    if (kvs.contains("speech_processor_enable")) {
+    if (kvs.contains("speech_processor_enable") && !m_speechProcDirty) {
+        // Skip while dirty: VOX/Tune status echoes on fw 3.10.15 carry the
+        // pre-command value and would clobber the optimistic update (#1104).
         bool v = kvs["speech_processor_enable"] == "1";
         if (m_speechProcEnable != v) { m_speechProcEnable = v; micChanged = true; }
     }
@@ -404,7 +407,12 @@ void TransmitModel::setSpeechProcessorEnable(bool on)
     // Pcap confirmed: SmartSDR uses speech_processor_enable (not compander).
     // Optimistic update: radio does not echo speech_processor_enable in
     // incremental status — only in the initial full dump on connect.
+    // Dirty guard: VOX/Tune commands trigger a full transmit status echo on
+    // fw 3.10.15 that carries the old value, clobbering this update (#1104).
+    // Ignore incoming speech_processor_enable for 2 s after we set it.
     m_speechProcEnable = on;
+    m_speechProcDirty = true;
+    QTimer::singleShot(2000, this, [this]() { m_speechProcDirty = false; });
     emit micStateChanged();
     emit commandReady(QString("transmit set speech_processor_enable=%1").arg(on ? 1 : 0));
 }
@@ -462,7 +470,16 @@ void TransmitModel::setVoxDelay(int delay)
 
 void TransmitModel::setMicBoost(bool on)
 {
+    m_micBoost = on;  // optimistic — radio sends no status echo (#1045)
+    emit phoneStateChanged();
     emit commandReady(QString("mic boost %1").arg(on ? 1 : 0));
+}
+
+void TransmitModel::setMicBias(bool on)
+{
+    m_micBias = on;  // optimistic — radio sends no status echo (#1045)
+    emit phoneStateChanged();
+    emit commandReady(QString("mic bias %1").arg(on ? 1 : 0));
 }
 
 void TransmitModel::setAmCarrierLevel(int level)
@@ -473,13 +490,18 @@ void TransmitModel::setAmCarrierLevel(int level)
 
 void TransmitModel::setDexp(bool on)
 {
-    // DEXP (downward expander / noise gate) — firmware v1.4.0.0
+    // Optimistic update — radio may not echo dexp in incremental status
+    m_dexpOn = on;
+    emit phoneStateChanged();
     emit commandReady(QString("transmit set dexp=%1").arg(on ? 1 : 0));
 }
 
 void TransmitModel::setDexpLevel(int level)
 {
     level = qBound(0, level, 100);
+    // Optimistic update — radio may not echo noise_gate_level in incremental status
+    m_dexpLevel = level;
+    emit phoneStateChanged();
     emit commandReady(QString("transmit set noise_gate_level=%1").arg(level));
 }
 
