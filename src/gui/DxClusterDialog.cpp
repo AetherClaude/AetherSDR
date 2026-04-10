@@ -3,6 +3,8 @@
 #include "core/DxClusterClient.h"
 #include "core/AppSettings.h"
 #include "models/RadioModel.h"
+#include "rotor/RotorController.h"
+#include "rotor/CountryCoordinates.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -26,6 +28,11 @@
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QTimer>
+#include <QMenu>
+#include <QAction>
+#include <QStatusBar>
+#include <QApplication>
+#include <QClipboard>
 
 namespace AetherSDR {
 
@@ -1690,6 +1697,96 @@ void DxClusterDialog::buildSpotListTab(QTabWidget* tabs)
         double freq = m_spotModel->freqAtRow(srcIdx.row());
         if (freq > 0.0)
             emit tuneRequested(freq);
+    });
+
+    // Right-click context menu: tune + point antenna via PstRotator
+    m_spotTable->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_spotTable, &QTableView::customContextMenuRequested, this,
+            [this](const QPoint& pos) {
+        const QModelIndex proxyIdx = m_spotTable->indexAt(pos);
+        if (!proxyIdx.isValid())
+            return;
+
+        const QModelIndex srcIdx = m_proxyModel->mapToSource(proxyIdx);
+        if (!srcIdx.isValid())
+            return;
+
+        // Retrieve the spot data for this row
+        const auto callIdx  = m_spotModel->index(srcIdx.row(), SpotTableModel::ColDxCall);
+        const auto freqIdx  = m_spotModel->index(srcIdx.row(), SpotTableModel::ColFreq);
+        const QString dxCall = m_spotModel->data(callIdx, Qt::DisplayRole).toString();
+        const double  freq   = m_spotModel->freqAtRow(srcIdx.row());
+
+        QMenu menu(m_spotTable);
+        menu.setStyleSheet(
+            "QMenu { background: #1a2a3a; color: #c8d8e8; border: 1px solid #304050; }"
+            "QMenu::item:selected { background: #2a4a6a; }"
+            "QMenu::separator { height: 1px; background: #304050; margin: 2px 0; }");
+
+        // ── Point antenna action ────────────────────────────────────────────
+        auto& cc = CountryCoordinates::instance();
+        const QString prefix    = cc.prefixFor(dxCall);
+        const QString country   = prefix.isEmpty() ? QString() : cc.countryName(prefix);
+
+        auto& s         = AppSettings::instance();
+        const double myLat = s.value("RotorMyLat",  0.0).toDouble();
+        const double myLon = s.value("RotorMyLon",  0.0).toDouble();
+        const QString rotorHost = s.value("RotorHost", "127.0.0.1").toString();
+        const quint16 rotorPort = static_cast<quint16>(s.value("RotorPort", 12000).toInt());
+
+        QAction* rotorAct = nullptr;
+        if (prefix.isEmpty()) {
+            rotorAct = menu.addAction(QString("Unknown DXCC: %1").arg(dxCall.left(4)));
+            rotorAct->setEnabled(false);
+        } else {
+            GeoCoord dxCoord;
+            cc.lookup(dxCall, dxCoord);
+            const double az = RotorController::bearing(myLat, myLon, dxCoord.lat, dxCoord.lon);
+            const int    azInt = qRound(az);
+            rotorAct = menu.addAction(
+                QString("\U0001F9ED Point antenna \u2192 %1 (%2\u00B0)").arg(country).arg(azInt));
+
+            connect(rotorAct, &QAction::triggered, this,
+                    [this, myLat, myLon, dxCoord, country, azInt, rotorHost, rotorPort] {
+                if (!m_rotor) {
+                    m_rotor = new RotorController(this);
+                    connect(m_rotor, &RotorController::errorOccurred,
+                            this, [](const QString& err) {
+                        qWarning("RotorController: %s", qPrintable(err));
+                    });
+                }
+                m_rotor->setTarget(rotorHost, rotorPort);
+                m_rotor->pointTo(myLat, myLon, dxCoord.lat, dxCoord.lon);
+                // Show brief confirmation in the dialog's cluster status bar
+                m_statusLabel->setText(
+                    QString("Rotor \u2192 %1 (%2\u00B0)").arg(country).arg(azInt));
+                m_statusLabel->setStyleSheet("QLabel { color: #00e060; font-size: 11px; }");
+                QTimer::singleShot(4000, this, [this] {
+                    m_statusLabel->setText("Connected");
+                    m_statusLabel->setStyleSheet("QLabel { color: #00b4d8; font-size: 11px; }");
+                });
+            });
+        }
+
+        menu.addSeparator();
+
+        // ── Copy callsign ───────────────────────────────────────────────────
+        QAction* copyAct = menu.addAction(
+            QString("Copy callsign: %1").arg(dxCall));
+        connect(copyAct, &QAction::triggered, this, [dxCall] {
+            QApplication::clipboard()->setText(dxCall);
+        });
+
+        // ── Tune to frequency ───────────────────────────────────────────────
+        if (freq > 0.0) {
+            QAction* tuneAct = menu.addAction(
+                QString("Tune to %1 MHz").arg(freq * 1000.0, 0, 'f', 3));
+            connect(tuneAct, &QAction::triggered, this, [this, freq] {
+                emit tuneRequested(freq);
+            });
+        }
+
+        menu.exec(m_spotTable->viewport()->mapToGlobal(pos));
     });
 
     layout->addWidget(m_spotTable, 1);

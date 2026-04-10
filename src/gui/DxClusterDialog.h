@@ -10,6 +10,7 @@
 #include "core/WsjtxClient.h"
 #include "core/SpotCollectorClient.h"
 #include "core/PotaClient.h"
+#include "rotor/RotorController.h"
 #ifdef HAVE_WEBSOCKETS
 #include "core/FreeDvClient.h"
 #endif
@@ -207,6 +208,7 @@ private:
     SpotTableModel*        m_spotModel;
     QTableView*            m_spotTable;
     BandFilterProxy*       m_proxyModel;
+    RotorController*       m_rotor{nullptr};
 
     // Display tab
     QLabel*            m_totalSpotsLabel{nullptr};
