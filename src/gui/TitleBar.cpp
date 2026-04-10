@@ -185,13 +185,13 @@ TitleBar::TitleBar(QWidget* parent)
     m_hbox->addWidget(m_speakerBtn);
 
     m_masterSlider = new GuardedSlider(Qt::Horizontal);
-    m_masterSlider->setRange(0, 100);
+    m_masterSlider->setRange(0, 200);
     int savedVol = s.value("MasterVolume", "100").toInt();
     m_masterSlider->setValue(savedVol);
     m_masterSlider->setFixedWidth(80);
     m_masterSlider->setFixedHeight(16);
     m_masterSlider->setAccessibleName("Master volume");
-    m_masterSlider->setAccessibleDescription("Line out volume level, 0 to 100 percent");
+    m_masterSlider->setAccessibleDescription("Volume level, 0 to 200 percent (above 100 applies software boost)");
     m_masterSlider->setStyleSheet(
         "QSlider::groove:horizontal { background: #1a2a3a; height: 4px; border-radius: 2px; }"
         "QSlider::handle:horizontal { background: #00b4d8; width: 10px; margin: -3px 0; border-radius: 5px; }"
@@ -199,7 +199,7 @@ TitleBar::TitleBar(QWidget* parent)
     m_hbox->addWidget(m_masterSlider);
 
     m_masterLabel = new QLabel(QString::number(savedVol));
-    m_masterLabel->setFixedWidth(22);
+    m_masterLabel->setFixedWidth(28);
     m_masterLabel->setStyleSheet("QLabel { color: #8aa8c0; font-size: 10px; }");
     m_masterLabel->setAlignment(Qt::AlignCenter);
     m_hbox->addWidget(m_masterLabel);
@@ -530,11 +530,31 @@ void TitleBar::showFeatureRequestDialogImpl()
     dlg->show();
 }
 
+void TitleBar::setDiscovering(bool active)
+{
+    m_discovering = active;
+    if (active) {
+        // Solid amber — discovery in progress, no connection yet
+        m_heartbeatOffTimer->stop();
+        m_heartbeatAlarmTimer->stop();
+        m_heartbeat->setStyleSheet(
+            "QLabel { background: #e0a020; border-radius: 5px; }");
+        m_heartbeat->setToolTip("Searching for radio…");
+    } else {
+        m_heartbeat->setToolTip("Radio discovery heartbeat");
+        // Return to idle gray — onHeartbeat() will take over once pings arrive
+        m_heartbeat->setStyleSheet(
+            "QLabel { background: #404858; border-radius: 5px; }");
+    }
+}
+
 void TitleBar::onHeartbeat()
 {
+    m_discovering = false;
     m_missedBeats = 0;
     m_heartbeatAlarmTimer->stop();
     m_alarmRed = false;
+    m_heartbeat->setToolTip("Radio discovery heartbeat");
     m_heartbeat->setStyleSheet(
         "QLabel { background: #20c060; border-radius: 5px; }");
     if (m_blinkEnabled) {
