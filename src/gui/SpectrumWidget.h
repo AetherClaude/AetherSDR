@@ -110,6 +110,9 @@ public:
     int stepSize() const { return m_stepHz; }
     void setStepSize(int hz) { m_stepHz = hz; }
 
+    // Set panadapter bandwidth zoom limits (MHz). Called per-radio model.
+    void setBandwidthLimits(double minMhz, double maxMhz) { m_minBwMhz = minMhz; m_maxBwMhz = maxMhz; }
+
     // Set the per-mode filter limits (Hz). Called when mode changes.
     void setFilterLimits(int minHz, int maxHz) { m_filterMinHz = minHz; m_filterMaxHz = maxHz; }
 
@@ -132,6 +135,12 @@ public:
     int  rfGainValue() const { return m_rfGainValue; }
     void setWnbActive(bool on) { m_wnbActive = on; markOverlayDirty(); }
     void setRfGain(int gain) { m_rfGainValue = gain; markOverlayDirty(); }
+
+    // HF propagation forecast overlay (K-index and Solar Flux Index).
+    // Values of -1 mean not yet fetched; visible only when enabled.
+    void setPropForecastVisible(bool on) { m_propForecastVisible = on; markOverlayDirty(); }
+    void setPropForecast(int kIndex, int sfi) { m_propKIndex = kIndex; m_propSfi = sfi; markOverlayDirty(); }
+    bool propForecastVisible() const { return m_propForecastVisible; }
 
     // NB Waterfall Blanker (#277) — client-side impulse suppression
     void setWfBlankerEnabled(bool on);
@@ -160,10 +169,14 @@ public:
     void setFftFps(int fps);
     void setFftFillAlpha(float a);
     void setFftFillColor(const QColor& c);
+    void setFftLineWidth(float w);
     void setFftHeatMap(bool on);
+    void setShowGrid(bool on);
     float fftFillAlpha() const         { return m_fftFillAlpha; }
     QColor fftFillColor() const        { return m_fftFillColor; }
+    float fftLineWidth() const         { return m_fftLineWidth; }
     bool fftHeatMap() const            { return m_fftHeatMap; }
+    bool showGrid() const              { return m_showGrid; }
     int   fftAverage() const           { return m_fftAverage; }
     int   fftFps() const               { return m_fftFps; }
     bool  fftWeightedAvg() const       { return m_fftWeightedAvg; }
@@ -313,6 +326,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
+    bool event(QEvent* event) override;
     void leaveEvent(QEvent* event) override;
 
 public:
@@ -376,14 +390,20 @@ private:
     int m_angleAccum{0};    // mouse wheel angle accumulator (#390)
     qint64 m_lastWheelMs{0}; // debounce: timestamp of last accepted wheel step
 
+    // Panadapter bandwidth zoom limits (MHz), set per-radio model
+    double m_minBwMhz{0.010};   // 10 kHz default
+    double m_maxBwMhz{5.400};   // safe default for unknown radios
+
     // ── FFT display controls (radio-side via "display pan set") ──────────
     int   m_panIndex{0};             // per-pan settings index (0, 1, 2, 3)
     int   m_fftAverage{0};           // 0=off, 1-10 frames
     bool  m_fftWeightedAvg{false};
     int   m_fftFps{25};
     float m_fftFillAlpha{0.70f};     // client-side fill opacity (0-1)
+    float m_fftLineWidth{1.5f};      // client-side spectrum trace thickness (px)
     QColor m_fftFillColor{0x00, 0xe5, 0xff};  // client-side fill color (default cyan)
     bool m_fftHeatMap{true};        // true = intensity heat map, false = solid color
+    bool m_showGrid{true};          // false = hide grid lines
 
     // ── Waterfall display controls (radio-side via "display panafall set") ─
     int   m_wfColorGain{50};         // 0-100, maps intensity to color range
@@ -445,6 +465,11 @@ private:
     // On-screen indicators (WNB, RF Gain)
     bool m_wnbActive{false};
     int  m_rfGainValue{0};
+
+    // HF propagation forecast overlay
+    bool m_propForecastVisible{false};
+    int  m_propKIndex{-1};
+    int  m_propSfi{-1};
 
     // Background image
     QImage  m_bgImage;
@@ -522,9 +547,11 @@ private:
     QMap<int, VfoWidget*> m_vfoWidgets;
     VfoWidget* m_vfoWidget{nullptr};  // alias to active slice widget (compat)
 
-    // Bottom-left waterfall zoom buttons: S(egment), B(and)
+    // Bottom-left waterfall zoom buttons: S(egment), B(and), −/+ (bandwidth)
     QPushButton* m_zoomSegBtn{nullptr};
     QPushButton* m_zoomBandBtn{nullptr};
+    QPushButton* m_zoomOutBtn{nullptr};
+    QPushButton* m_zoomInBtn{nullptr};
 
 #ifdef AETHER_GPU_SPECTRUM
     bool m_rhiInitialized{false};

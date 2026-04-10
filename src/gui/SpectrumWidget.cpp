@@ -13,6 +13,7 @@
 #include <QResizeEvent>
 #include <QMouseEvent>
 #include <QWheelEvent>
+#include <QNativeGestureEvent>
 #include <QMenu>
 #include <QToolTip>
 #include <QDialog>
@@ -160,6 +161,8 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     };
     m_zoomSegBtn  = makeBtn("S");
     m_zoomBandBtn = makeBtn("B");
+    m_zoomOutBtn  = makeBtn("\u2212");  // minus sign U+2212
+    m_zoomInBtn   = makeBtn("+");
 
     // SmartSDR pcap: B sends "band_zoom=1", S sends "segment_zoom=1"
     connect(m_zoomBandBtn, &QPushButton::clicked, this, [this]() {
@@ -168,6 +171,20 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     connect(m_zoomSegBtn, &QPushButton::clicked, this, [this]() {
         emit segmentZoomRequested();
     });
+
+    // Bandwidth zoom: − zooms out (wider BW), + zooms in (narrower BW)
+    // Send both bandwidth AND current center to prevent the radio from
+    // auto-centering the panadapter (which causes band jumps).
+    auto emitZoom = [this](double factor) {
+        const double newBw = m_bandwidthMhz * factor;
+        if (newBw < m_minBwMhz || newBw > m_maxBwMhz) { return; }  // at limit
+        m_bandwidthMhz = newBw;
+        markOverlayDirty();
+        emit bandwidthChangeRequested(newBw);
+        emit centerChangeRequested(m_centerMhz);  // anchor the current center
+    };
+    connect(m_zoomOutBtn, &QPushButton::clicked, this, [emitZoom]() { emitZoom(1.5); });
+    connect(m_zoomInBtn,  &QPushButton::clicked, this, [emitZoom]() { emitZoom(1.0 / 1.5); });
 }
 
 // ── Multi-VfoWidget management ────────────────────────────────────────────────
@@ -191,6 +208,7 @@ void SpectrumWidget::loadSettings()
     m_fftAverage     = s.value(settingsKey("DisplayFftAverage"), "0").toInt();
     m_fftFps         = s.value(settingsKey("DisplayFftFps"), "25").toInt();
     m_fftFillAlpha   = s.value(settingsKey("DisplayFftFillAlpha"), "0.70").toFloat();
+    m_fftLineWidth   = std::clamp(s.value(settingsKey("DisplayFftLineWidth"), "1.5").toFloat(), 0.5f, 5.0f);
     m_fftWeightedAvg = s.value(settingsKey("DisplayFftWeightedAvg"), "False").toString() == "True";
     const QString fillColorStr = s.value(settingsKey("DisplayFftFillColor"), "#00e5ff").toString();
     QColor parsed(fillColorStr);
@@ -212,6 +230,7 @@ void SpectrumWidget::loadSettings()
         m_bandPlanFontSize = s.value("BandPlanFontSize", "6").toInt();
     }
     m_fftHeatMap     = s.value(settingsKey("DisplayFftHeatMap"), "True").toString() == "True";
+    m_showGrid       = s.value(settingsKey("DisplayShowGrid"), "True").toString() == "True";
     m_wfColorScheme  = static_cast<WfColorScheme>(
         std::clamp(s.value(settingsKey("DisplayWfColorScheme"), "0").toInt(),
                    0, static_cast<int>(WfColorScheme::Count) - 1));
@@ -228,7 +247,8 @@ void SpectrumWidget::loadSettings()
         m_overlayMenu->syncDisplaySettings(m_fftAverage, m_fftFps,
             static_cast<int>(m_fftFillAlpha * 100), m_fftWeightedAvg, m_fftFillColor,
             m_wfColorGain, m_wfBlackLevel, m_wfAutoBlack, m_wfLineDuration,
-            75, false, m_fftHeatMap, static_cast<int>(m_wfColorScheme));
+            75, false, m_fftHeatMap, static_cast<int>(m_wfColorScheme), m_showGrid,
+            m_fftLineWidth);
 }
 
 VfoWidget* SpectrumWidget::addVfoWidget(int sliceId)
@@ -294,6 +314,13 @@ void SpectrumWidget::setFftHeatMap(bool on) {
     s.setValue(settingsKey("DisplayFftHeatMap"), on ? "True" : "False");
     s.save();
 }
+void SpectrumWidget::setShowGrid(bool on) {
+    m_showGrid = on;
+    auto& s = AppSettings::instance();
+    s.setValue(settingsKey("DisplayShowGrid"), on ? "True" : "False");
+    s.save();
+    markOverlayDirty();
+}
 void SpectrumWidget::setFftFillAlpha(float a) {
     m_fftFillAlpha = std::clamp(a, 0.0f, 1.0f);
     auto& s = AppSettings::instance();
@@ -305,6 +332,13 @@ void SpectrumWidget::setFftFillColor(const QColor& c) {
     m_fftFillColor = c;
     auto& s = AppSettings::instance();
     s.setValue(settingsKey("DisplayFftFillColor"), c.name());
+    s.save();
+    markOverlayDirty();
+}
+void SpectrumWidget::setFftLineWidth(float w) {
+    m_fftLineWidth = std::clamp(w, 0.5f, 5.0f);
+    auto& s = AppSettings::instance();
+    s.setValue(settingsKey("DisplayFftLineWidth"), QString::number(m_fftLineWidth, 'f', 1));
     s.save();
     markOverlayDirty();
 }
@@ -1181,16 +1215,8 @@ void SpectrumWidget::mouseMoveEvent(QMouseEvent* ev)
         // 4x multiplier: dragging 1/4 of widget width doubles/halves bandwidth
         const double scale = std::pow(2.0, static_cast<double>(-dx) / (width() / 4.0));
         const double newBw = std::clamp(m_bwDragStartBw * scale, 0.004, 14.0);
-        // SSB modes: center on filter midpoint so the passband stays visible.
-        // Other modes: center on VFO frequency.
+        // Keep the current pan center on zoom — don't snap to VFO. (#1093)
         double zoomCenter = m_centerMhz;
-        if (const auto* ao = activeOverlay()) {
-            if (m_mode == "USB" || m_mode == "LSB" || m_mode == "DIGU" || m_mode == "DIGL" || m_mode == "RTTY") {
-                zoomCenter = ao->freqMhz + (ao->filterLowHz + ao->filterHighHz) / 2.0 / 1.0e6;
-            } else {
-                zoomCenter = ao->freqMhz;
-            }
-        }
         m_bandwidthMhz = newBw;
         m_centerMhz = zoomCenter;
         markOverlayDirty();
@@ -1593,6 +1619,35 @@ void SpectrumWidget::setBackgroundImage(const QString& path)
     markOverlayDirty();
 }
 
+bool SpectrumWidget::event(QEvent* ev)
+{
+    if (ev->type() == QEvent::NativeGesture) {
+        auto* ge = static_cast<QNativeGestureEvent*>(ev);
+        if (ge->gestureType() == Qt::ZoomNativeGesture) {
+            // value > 0 = pinch out (zoom in = narrower BW)
+            // value < 0 = pinch in  (zoom out = wider BW)
+            // Zoom anchored on the frequency under the cursor: the frequency
+            // at the mouse position stays at that pixel after the zoom.
+            const double delta = ge->value();
+            if (qFuzzyIsNull(delta)) { return true; }
+            const double factor = 1.0 / (1.0 + delta);  // invert: pinch-out narrows BW
+            const double newBw = m_bandwidthMhz * factor;
+            if (newBw < m_minBwMhz || newBw > m_maxBwMhz) { return true; }  // at limit
+            // Anchor: keep the frequency under the cursor at the same pixel.
+            const double mouseXFrac = ge->position().x() / width() - 0.5;
+            const double anchorMhz = m_centerMhz + mouseXFrac * m_bandwidthMhz;
+            const double newCenter = anchorMhz - mouseXFrac * newBw;
+            m_bandwidthMhz = newBw;
+            m_centerMhz = newCenter;
+            markOverlayDirty();
+            emit bandwidthChangeRequested(newBw);
+            emit centerChangeRequested(newCenter);
+            return true;
+        }
+    }
+    return SPECTRUM_BASE_CLASS::event(ev);
+}
+
 void SpectrumWidget::wheelEvent(QWheelEvent* ev)
 {
     // Skip scroll on the divider + freq scale bar.
@@ -1690,9 +1745,12 @@ void SpectrumWidget::positionZoomButtons()
     constexpr int sz = 22;
     const int botY = height() - pad;
 
-    // S | B at bottom-left
-    m_zoomSegBtn->move(pad, botY - sz);
-    m_zoomBandBtn->move(pad + sz + 2, botY - sz);
+    // Row 1 (bottom): − | + (bandwidth zoom)
+    m_zoomOutBtn->move(pad, botY - sz);
+    m_zoomInBtn->move(pad + sz + 2, botY - sz);
+    // Row 0 (above): S | B (segment/band zoom)
+    m_zoomSegBtn->move(pad, botY - sz - sz - 2);
+    m_zoomBandBtn->move(pad + sz + 2, botY - sz - sz - 2);
 }
 
 // ─── Colour map ───────────────────────────────────────────────────────────────
@@ -2024,6 +2082,12 @@ void SpectrumWidget::initialize(QRhiCommandBuffer* cb)
     m_wfTexFullUpload = false;
     m_wfLastUploadedRow = m_wfWriteRow;
     m_rhiInitialized = true;
+
+    // Re-apply cursor now that the native HWND exists on Windows. (#1096)
+    // setCursor() in the constructor runs before QRhiWidget creates its native
+    // surface; calling it again here ensures the HWND gets the correct cursor
+    // shape rather than defaulting to NULL (invisible).
+    setCursor(cursor());
 }
 
 void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb)
@@ -2185,24 +2249,32 @@ void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb)
             drawSliceMarkers(p, specRect, wfRect);
             drawOffScreenSlices(p, specRect);
 
-            // WNB / RF gain indicators (horizontal, top-left of spectrum)
-            if (m_wnbActive || m_rfGainValue != 0) {
-                QFont indFont(p.font().family(), 14, QFont::Bold);
-                p.setFont(indFont);
-                p.setPen(QColor(0xc8, 0xd8, 0xe8, 180));
-                const QFontMetrics fm(indFont);
-                int y = specRect.top() + fm.ascent() + 4;
-                // Build combined label, measure, and right-align
-                QString label;
-                if (m_wnbActive)
-                    label += QStringLiteral("WNB");
-                if (m_rfGainValue != 0) {
-                    if (!label.isEmpty()) label += QStringLiteral("   ");
-                    label += QStringLiteral("%1%2 dB")
-                        .arg(m_rfGainValue > 0 ? "+" : "").arg(m_rfGainValue);
+            // WNB / RF gain / Prop forecast indicators (top-right of spectrum)
+            {
+                const bool showProp = m_propForecastVisible && m_propKIndex >= 0 && m_propSfi > 0;
+                if (m_wnbActive || m_rfGainValue != 0 || showProp) {
+                    QFont indFont(p.font().family(), 14, QFont::Bold);
+                    p.setFont(indFont);
+                    p.setPen(QColor(0xc8, 0xd8, 0xe8, 180));
+                    const QFontMetrics fm(indFont);
+                    int y = specRect.top() + fm.ascent() + 4;
+                    // Build combined label (left to right: prop, WNB, RF gain), right-align
+                    QString label;
+                    if (showProp) {
+                        label += QString("K%1  SFI %2").arg(m_propKIndex).arg(m_propSfi);
+                    }
+                    if (m_wnbActive) {
+                        if (!label.isEmpty()) { label += QStringLiteral("   "); }
+                        label += QStringLiteral("WNB");
+                    }
+                    if (m_rfGainValue != 0) {
+                        if (!label.isEmpty()) { label += QStringLiteral("   "); }
+                        label += QStringLiteral("%1%2 dB")
+                            .arg(m_rfGainValue > 0 ? "+" : "").arg(m_rfGainValue);
+                    }
+                    int x = specRect.right() - DBM_STRIP_W - 8 - fm.horizontalAdvance(label);
+                    p.drawText(x, y, label);
                 }
-                int x = specRect.right() - DBM_STRIP_W - 8 - fm.horizontalAdvance(label);
-                p.drawText(x, y, label);
             }
 
             // Cursor frequency label (#726)
@@ -2688,36 +2760,48 @@ void SpectrumWidget::paintEvent(QPaintEvent* ev)
         m_overlayMenu->raiseAll();
     }
 
-    // ── WNB / RF Gain indicators (top-right of FFT area) ──────────────────
-    if (m_wnbActive || m_rfGainValue != 0) {
-        QFont indFont = p.font();
-        indFont.setPointSize(18);
-        indFont.setBold(true);
-        p.setFont(indFont);
-        p.setPen(QColor(255, 255, 255, 84));
+    // ── WNB / RF Gain / Prop Forecast indicators (top-right of FFT area) ────
+    {
+        const bool showProp = m_propForecastVisible && m_propKIndex >= 0 && m_propSfi > 0;
+        if (m_wnbActive || m_rfGainValue != 0 || showProp) {
+            QFont indFont = p.font();
+            indFont.setPointSize(18);
+            indFont.setBold(true);
+            p.setFont(indFont);
+            p.setPen(QColor(255, 255, 255, 84));
 
-        const QFontMetrics fm(indFont);
-        const int rightEdge = specRect.right() - DBM_STRIP_W - 6;
-        const int topY = specRect.top() + fm.ascent() + 2;
+            const QFontMetrics fm(indFont);
+            const int rightEdge = specRect.right() - DBM_STRIP_W - 6;
+            const int topY = specRect.top() + fm.ascent() + 2;
 
-        int x = rightEdge;
+            int x = rightEdge;
 
-        // RF Gain (rightmost)
-        if (m_rfGainValue != 0) {
-            QString gainStr = (m_rfGainValue > 0)
-                ? QString("+%1dB").arg(m_rfGainValue)
-                : QString("%1dB").arg(m_rfGainValue);
-            int gw = fm.horizontalAdvance(gainStr);
-            x -= gw;
-            p.drawText(x, topY, gainStr);
-            x -= 10;  // gap between labels
-        }
+            // RF Gain (rightmost)
+            if (m_rfGainValue != 0) {
+                QString gainStr = (m_rfGainValue > 0)
+                    ? QString("+%1dB").arg(m_rfGainValue)
+                    : QString("%1dB").arg(m_rfGainValue);
+                int gw = fm.horizontalAdvance(gainStr);
+                x -= gw;
+                p.drawText(x, topY, gainStr);
+                x -= 10;  // gap between labels
+            }
 
-        // WNB (to the left of RF Gain)
-        if (m_wnbActive) {
-            int ww = fm.horizontalAdvance("WNB");
-            x -= ww;
-            p.drawText(x, topY, "WNB");
+            // WNB (to the left of RF Gain)
+            if (m_wnbActive) {
+                int ww = fm.horizontalAdvance("WNB");
+                x -= ww;
+                p.drawText(x, topY, "WNB");
+                x -= 10;
+            }
+
+            // Prop forecast (leftmost: "K3  SFI 110")
+            if (showProp) {
+                QString propStr = QString("K%1  SFI %2").arg(m_propKIndex).arg(m_propSfi);
+                int pw = fm.horizontalAdvance(propStr);
+                x -= pw;
+                p.drawText(x, topY, propStr);
+            }
         }
     }
 
@@ -2751,6 +2835,7 @@ void SpectrumWidget::paintEvent(QPaintEvent* ev)
 
 void SpectrumWidget::drawGrid(QPainter& p, const QRect& r)
 {
+    if (!m_showGrid) return;
     const int w = r.width();
     const int h = r.height();
 
@@ -2836,7 +2921,7 @@ void SpectrumWidget::drawSpectrum(QPainter& p, const QRect& r)
     p.setRenderHint(QPainter::Antialiasing, true);
     p.fillPath(fillPath, grad);
     // Stroke only the spectrum line, not the fill closure
-    p.setPen(QPen(m_fftFillColor, 1.5));
+    p.setPen(QPen(m_fftFillColor, m_fftLineWidth));
     p.drawPath(linePath);
     p.setRenderHint(QPainter::Antialiasing, false);
 }
