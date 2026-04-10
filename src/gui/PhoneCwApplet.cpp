@@ -167,6 +167,14 @@ void PhoneCwApplet::buildPhonePanel()
         m_micSourceCombo->setFixedHeight(22);
         m_micSourceCombo->setAccessibleName("Microphone source");
         m_micSourceCombo->setAccessibleDescription("Select microphone input source");
+        m_micSourceCombo->setToolTip(
+            "Select the microphone input source.\n\n"
+            "PC \u2014 routes your computer\u2019s microphone to the radio over the\n"
+            "     network. Required when operating from macOS or any PC\n"
+            "     without a physical microphone at the radio.\n\n"
+            "MIC / BAL / LINE / ACC \u2014 physical hardware inputs on the radio.\n"
+            "     If no hardware mic is connected, selecting these will\n"
+            "     result in no TX audio.");
         AetherSDR::applyComboStyle(m_micSourceCombo);
         m_micSourceCombo->addItems({"MIC", "BAL", "LINE", "ACC", "PC"});
         connect(m_micSourceCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -638,6 +646,23 @@ void PhoneCwApplet::syncPhoneFromModel()
         const QSignalBlocker blocker(m_micSourceCombo);
         int idx = m_micSourceCombo->findText(m_model->micSelection());
         if (idx >= 0) m_micSourceCombo->setCurrentIndex(idx);
+    }
+
+    // Warn when a hardware input is selected: PC is required for computer-side
+    // microphone audio (remote/macOS operation). Amber border signals to the
+    // user that no TX audio will be heard from the computer mic (#1076).
+    if (m_model->micSelection() == "PC") {
+        AetherSDR::applyComboStyle(m_micSourceCombo);
+    } else {
+        m_micSourceCombo->setStyleSheet(
+            QString("QComboBox { background: #2a1800; color: #ffcc66;"
+                    " border: 1px solid #cc7700;"
+                    " padding: 2px 2px 2px 4px; border-radius: 2px; }"
+                    "QComboBox::drop-down { border: none; width: 14px; }"
+                    "QComboBox::down-arrow { image: url(%1); width: 8px; height: 6px; }"
+                    "QComboBox QAbstractItemView { background: #1a2a3a; color: #c8d8e8;"
+                    " selection-background-color: #00b4d8; }")
+            .arg(AetherSDR::comboArrowPath()));
     }
 
     // PC mic gain is client-authoritative (radio always returns mic_level=0 for PC)
