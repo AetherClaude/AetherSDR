@@ -1,5 +1,4 @@
 #include "MainWindow.h"
-#include "ThemePalette.h"
 #include "ConnectionPanel.h"
 #include "TitleBar.h"
 #include "PanadapterApplet.h"
@@ -55,7 +54,6 @@
 #endif
 #include "AetherDspDialog.h"
 #include "DspParamPopup.h"
-#include "ComboStyle.h"
 
 #include <memory>
 #include <functional>
@@ -187,13 +185,7 @@ MainWindow::MainWindow(QWidget* parent)
     setMinimumSize(1024, 600);
     resize(1400, 800);
 
-    // Restore theme preference before building any UI (#1160)
-    {
-        bool light = AppSettings::instance()
-                         .value("ColorTheme", "Dark").toString() == "Light";
-        ThemePalette::setLight(light);
-    }
-    applyTheme();
+    applyDarkTheme();
 
     // Audio worker thread (#502) — AudioEngine runs on its own thread so
     // audio processing never competes with paintEvent for main thread CPU.
@@ -1313,6 +1305,13 @@ MainWindow::MainWindow(QWidget* parent)
     // All three power gauges (TxApplet, TunerApplet, SMeterWidget) update together.
     auto updatePowerScale = [this]() {
         int maxW = m_radioModel.transmitModel().maxPowerLevel();
+        // Aurora (AU-) radios have an integrated 600W PA (Overlord) but
+        // max_power_level only reports the exciter limit (100W). Use model
+        // name to detect the true PA capability. (#484)
+        const QString& model = m_radioModel.model();
+        if (model.startsWith("AU-") && maxW <= 100) {
+            maxW = 500;
+        }
         bool hasAmp = m_radioModel.hasAmplifier();
         m_appletPanel->txApplet()->setPowerScale(maxW, hasAmp);
         m_appletPanel->tunerApplet()->setPowerScale(maxW, hasAmp);
@@ -3103,18 +3102,6 @@ void MainWindow::buildMenuBar()
         m_shortcutManager.rebuildShortcuts(this, shortcutGuard);
     });
 
-    // Light / dark theme toggle (#1160)
-    viewMenu->addSeparator();
-    auto* lightThemeAct = viewMenu->addAction("Light Theme");
-    lightThemeAct->setCheckable(true);
-    lightThemeAct->setChecked(ThemePalette::isLight());
-    connect(lightThemeAct, &QAction::toggled, this, [this](bool on) {
-        ThemePalette::setLight(on);
-        reapplyTheme();
-        AppSettings::instance().setValue("ColorTheme", on ? "Light" : "Dark");
-        AppSettings::instance().save();
-    });
-
     viewMenu->addSeparator();
     auto* heartbeatBlinkAct = viewMenu->addAction("Blink Status Indicator");
     heartbeatBlinkAct->setCheckable(true);
@@ -3900,21 +3887,17 @@ void MainWindow::buildUI()
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 
-void MainWindow::applyTheme()
+void MainWindow::applyDarkTheme()
 {
-    const ThemePalette& pal = ThemePalette::current();
-
-    // Build the global stylesheet from palette colour roles so that both the
-    // dark and light variants share one definition (#1160).
-    setStyleSheet(QString(R"(
+    setStyleSheet(R"(
         QWidget {
-            background-color: %1;
-            color: %2;
+            background-color: #0f0f1a;
+            color: #c8d8e8;
             font-family: "Inter", "Segoe UI", sans-serif;
             font-size: 13px;
         }
         QGroupBox {
-            border: 1px solid %3;
+            border: 1px solid #203040;
             border-radius: 4px;
             margin-top: 8px;
             padding-top: 8px;
@@ -3922,69 +3905,53 @@ void MainWindow::applyTheme()
         QGroupBox::title {
             subcontrol-origin: margin;
             left: 8px;
-            color: %4;
+            color: #00b4d8;
         }
         QPushButton {
-            background-color: %5;
-            border: 1px solid %3;
+            background-color: #1a2a3a;
+            border: 1px solid #203040;
             border-radius: 4px;
             padding: 4px 10px;
-            color: %2;
+            color: #c8d8e8;
         }
-        QPushButton:hover  { background-color: %3; }
-        QPushButton:pressed { background-color: %4; color: #000; }
+        QPushButton:hover  { background-color: #203040; }
+        QPushButton:pressed { background-color: #00b4d8; color: #000; }
         QComboBox {
-            background-color: %5;
-            border: 1px solid %3;
+            background-color: #1a2a3a;
+            border: 1px solid #203040;
             border-radius: 4px;
             padding: 3px 6px;
         }
         QComboBox::drop-down { border: none; }
         QListWidget {
-            background-color: %1;
-            border: 1px solid %3;
-            alternate-background-color: %6;
+            background-color: #111120;
+            border: 1px solid #203040;
+            alternate-background-color: #161626;
         }
-        QListWidget::item:selected { background-color: %4; color: #000; }
+        QListWidget::item:selected { background-color: #00b4d8; color: #000; }
         QSlider::groove:horizontal {
             height: 4px;
-            background: %3;
+            background: #203040;
             border-radius: 2px;
         }
         QSlider::handle:horizontal {
             width: 14px; height: 14px;
             margin: -5px 0;
-            background: %4;
+            background: #00b4d8;
             border-radius: 7px;
         }
-        QMenuBar { background-color: %7; }
-        QMenuBar::item:selected { background-color: %5; }
-        QMenu { background-color: %1; border: 1px solid %3; }
-        QMenu::item:selected { background-color: %4; color: #000; }
-        QStatusBar { background-color: %7; border-top: 1px solid %3; }
+        QMenuBar { background-color: #0a0a14; }
+        QMenuBar::item:selected { background-color: #1a2a3a; }
+        QMenu { background-color: #111120; border: 1px solid #203040; }
+        QMenu::item:selected { background-color: #00b4d8; color: #000; }
+        QStatusBar { background-color: #0a0a14; border-top: 1px solid #203040; }
         QProgressBar {
-            background-color: %1;
-            border: 1px solid %3;
+            background-color: #111120;
+            border: 1px solid #203040;
             border-radius: 3px;
         }
-        QSplitter::handle { background-color: %3; width: 2px; }
-    )")
-    .arg(pal.background.name(),   // %1 background
-         pal.text.name(),          // %2 text
-         pal.border.name(),        // %3 border
-         pal.accent.name(),        // %4 accent
-         pal.widgetBg.name(),      // %5 widgetBg
-         pal.altRowBg.name(),      // %6 altRowBg
-         pal.deepBg.name()));      // %7 deepBg
-}
-
-void MainWindow::reapplyTheme()
-{
-    applyTheme();
-    // Delegate per-widget refresh to AppletPanel (title bars, combos, S-Meter)
-    if (m_appletPanel)
-        m_appletPanel->refreshTheme();
-    update();
+        QSplitter::handle { background-color: #203040; width: 2px; }
+    )");
 }
 
 // ─── Radio/model event handlers ───────────────────────────────────────────────
