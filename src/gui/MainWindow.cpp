@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "ThemePalette.h"
 #include "ConnectionPanel.h"
 #include "TitleBar.h"
 #include "PanadapterApplet.h"
@@ -54,6 +55,7 @@
 #endif
 #include "AetherDspDialog.h"
 #include "DspParamPopup.h"
+#include "ComboStyle.h"
 
 #include <memory>
 #include <functional>
@@ -185,7 +187,13 @@ MainWindow::MainWindow(QWidget* parent)
     setMinimumSize(1024, 600);
     resize(1400, 800);
 
-    applyDarkTheme();
+    // Restore theme preference before building any UI (#1160)
+    {
+        bool light = AppSettings::instance()
+                         .value("ColorTheme", "Dark").toString() == "Light";
+        ThemePalette::setLight(light);
+    }
+    applyTheme();
 
     // Audio worker thread (#502) — AudioEngine runs on its own thread so
     // audio processing never competes with paintEvent for main thread CPU.
@@ -3095,6 +3103,18 @@ void MainWindow::buildMenuBar()
         m_shortcutManager.rebuildShortcuts(this, shortcutGuard);
     });
 
+    // Light / dark theme toggle (#1160)
+    viewMenu->addSeparator();
+    auto* lightThemeAct = viewMenu->addAction("Light Theme");
+    lightThemeAct->setCheckable(true);
+    lightThemeAct->setChecked(ThemePalette::isLight());
+    connect(lightThemeAct, &QAction::toggled, this, [this](bool on) {
+        ThemePalette::setLight(on);
+        reapplyTheme();
+        AppSettings::instance().setValue("ColorTheme", on ? "Light" : "Dark");
+        AppSettings::instance().save();
+    });
+
     viewMenu->addSeparator();
     auto* heartbeatBlinkAct = viewMenu->addAction("Blink Status Indicator");
     heartbeatBlinkAct->setCheckable(true);
@@ -3880,17 +3900,21 @@ void MainWindow::buildUI()
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 
-void MainWindow::applyDarkTheme()
+void MainWindow::applyTheme()
 {
-    setStyleSheet(R"(
+    const ThemePalette& pal = ThemePalette::current();
+
+    // Build the global stylesheet from palette colour roles so that both the
+    // dark and light variants share one definition (#1160).
+    setStyleSheet(QString(R"(
         QWidget {
-            background-color: #0f0f1a;
-            color: #c8d8e8;
+            background-color: %1;
+            color: %2;
             font-family: "Inter", "Segoe UI", sans-serif;
             font-size: 13px;
         }
         QGroupBox {
-            border: 1px solid #203040;
+            border: 1px solid %3;
             border-radius: 4px;
             margin-top: 8px;
             padding-top: 8px;
@@ -3898,53 +3922,69 @@ void MainWindow::applyDarkTheme()
         QGroupBox::title {
             subcontrol-origin: margin;
             left: 8px;
-            color: #00b4d8;
+            color: %4;
         }
         QPushButton {
-            background-color: #1a2a3a;
-            border: 1px solid #203040;
+            background-color: %5;
+            border: 1px solid %3;
             border-radius: 4px;
             padding: 4px 10px;
-            color: #c8d8e8;
+            color: %2;
         }
-        QPushButton:hover  { background-color: #203040; }
-        QPushButton:pressed { background-color: #00b4d8; color: #000; }
+        QPushButton:hover  { background-color: %3; }
+        QPushButton:pressed { background-color: %4; color: #000; }
         QComboBox {
-            background-color: #1a2a3a;
-            border: 1px solid #203040;
+            background-color: %5;
+            border: 1px solid %3;
             border-radius: 4px;
             padding: 3px 6px;
         }
         QComboBox::drop-down { border: none; }
         QListWidget {
-            background-color: #111120;
-            border: 1px solid #203040;
-            alternate-background-color: #161626;
+            background-color: %1;
+            border: 1px solid %3;
+            alternate-background-color: %6;
         }
-        QListWidget::item:selected { background-color: #00b4d8; color: #000; }
+        QListWidget::item:selected { background-color: %4; color: #000; }
         QSlider::groove:horizontal {
             height: 4px;
-            background: #203040;
+            background: %3;
             border-radius: 2px;
         }
         QSlider::handle:horizontal {
             width: 14px; height: 14px;
             margin: -5px 0;
-            background: #00b4d8;
+            background: %4;
             border-radius: 7px;
         }
-        QMenuBar { background-color: #0a0a14; }
-        QMenuBar::item:selected { background-color: #1a2a3a; }
-        QMenu { background-color: #111120; border: 1px solid #203040; }
-        QMenu::item:selected { background-color: #00b4d8; color: #000; }
-        QStatusBar { background-color: #0a0a14; border-top: 1px solid #203040; }
+        QMenuBar { background-color: %7; }
+        QMenuBar::item:selected { background-color: %5; }
+        QMenu { background-color: %1; border: 1px solid %3; }
+        QMenu::item:selected { background-color: %4; color: #000; }
+        QStatusBar { background-color: %7; border-top: 1px solid %3; }
         QProgressBar {
-            background-color: #111120;
-            border: 1px solid #203040;
+            background-color: %1;
+            border: 1px solid %3;
             border-radius: 3px;
         }
-        QSplitter::handle { background-color: #203040; width: 2px; }
-    )");
+        QSplitter::handle { background-color: %3; width: 2px; }
+    )")
+    .arg(pal.background.name(),   // %1 background
+         pal.text.name(),          // %2 text
+         pal.border.name(),        // %3 border
+         pal.accent.name(),        // %4 accent
+         pal.widgetBg.name(),      // %5 widgetBg
+         pal.altRowBg.name(),      // %6 altRowBg
+         pal.deepBg.name()));      // %7 deepBg
+}
+
+void MainWindow::reapplyTheme()
+{
+    applyTheme();
+    // Delegate per-widget refresh to AppletPanel (title bars, combos, S-Meter)
+    if (m_appletPanel)
+        m_appletPanel->refreshTheme();
+    update();
 }
 
 // ─── Radio/model event handlers ───────────────────────────────────────────────
