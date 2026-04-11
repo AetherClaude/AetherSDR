@@ -2855,16 +2855,6 @@ void MainWindow::buildMenuBar()
         }
 #endif
     });
-#ifdef HAVE_WEBSOCKETS
-    // Keep autoTciAction checkbox in sync when the CatApplet Enable button is toggled
-    if (m_appletPanel && m_appletPanel->catApplet()) {
-        connect(m_appletPanel->catApplet(), &CatApplet::tciToggled,
-                this, [autoTciAction](bool on) {
-            QSignalBlocker b(autoTciAction);
-            autoTciAction->setChecked(on);
-        });
-    }
-#endif
 
     auto* autoDaxAction = settingsMenu->addAction("Autostart DAX with AetherSDR");
     autoDaxAction->setCheckable(true);
