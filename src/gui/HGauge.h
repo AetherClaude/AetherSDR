@@ -152,10 +152,13 @@ protected:
         lblFont.setPixelSize(10);
         lblFont.setBold(true);
         p.setFont(lblFont);
-        p.setPen(QColor(0x80, 0x90, 0xa0));
         const QFontMetrics lfm(lblFont);
-        int labelW = lfm.horizontalAdvance(m_label);
-        p.drawText((w - labelW) / 2, barY + barH / 2 + lfm.ascent() / 2 - 1, m_label);
+        int labelTextW = lfm.horizontalAdvance(m_label);
+        int labelX = (w - labelTextW) / 2;
+        // Use white when the fill bar covers the label centre for legibility (#1152)
+        bool covered = fillW > labelX + labelTextW / 2;
+        p.setPen(covered ? QColor(0xff, 0xff, 0xff) : QColor(0x80, 0x90, 0xa0));
+        p.drawText(labelX, barY + barH / 2 + lfm.ascent() / 2 - 1, m_label);
     }
 
 private:
