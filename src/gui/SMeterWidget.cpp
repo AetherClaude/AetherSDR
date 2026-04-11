@@ -1,4 +1,5 @@
 #include "SMeterWidget.h"
+#include "ThemePalette.h"
 
 #include <QPainter>
 #include <QPainterPath>
@@ -194,7 +195,7 @@ void SMeterWidget::paintEvent(QPaintEvent*)
     const int h = height();
 
     // Background
-    p.fillRect(rect(), QColor(0x0f, 0x0f, 0x1a));
+    p.fillRect(rect(), ThemePalette::current().background);
 
     // -- Arc geometry ---------------------------------------------------------
     // Large radius with center far below widget -> shallow ~70 deg arc segment

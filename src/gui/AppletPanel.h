@@ -64,6 +64,9 @@ public:
     // Reset applet order to default
     void resetOrder();
 
+    // Re-apply the active ThemePalette to all title bars and combo boxes (#1160)
+    void refreshTheme();
+
     // Global controls lock — disables wheel/mouse on sidebar sliders (#745)
     bool controlsLocked() const;
     void setControlsLocked(bool locked);
