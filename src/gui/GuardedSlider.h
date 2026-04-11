@@ -4,6 +4,7 @@
 #include <QComboBox>
 #include <QAbstractItemView>
 #include <QLabel>
+#include <QMouseEvent>
 #include <QWheelEvent>
 
 // Global lock for sidebar controls — when locked, sliders, combo boxes,
@@ -25,12 +26,40 @@ private:
 class GuardedSlider : public QSlider {
 public:
     using QSlider::QSlider;
+    // On Linux with Qt's Fusion style, the slider handle hit-test rect is
+    // computed from the groove geometry only, ignoring negative CSS margins.
+    // The shared stylesheet uses margin:-3px on a 4px groove, leaving only a
+    // 4px clickable zone for a 10px handle. Guarantee at least 14px height so
+    // the full handle always falls within the interactive area. (#1145)
+    QSize sizeHint() const override {
+        QSize s = QSlider::sizeHint();
+        if (orientation() == Qt::Horizontal && s.height() < 14)
+            s.setHeight(14);
+        return s;
+    }
+    QSize minimumSizeHint() const override {
+        QSize s = QSlider::minimumSizeHint();
+        if (orientation() == Qt::Horizontal && s.height() < 14)
+            s.setHeight(14);
+        return s;
+    }
+    void mousePressEvent(QMouseEvent* ev) override {
+        if (ControlsLock::isLocked()) {
+            ev->ignore();
+            return;
+        }
+        QSlider::mousePressEvent(ev);
+    }
     void wheelEvent(QWheelEvent* ev) override {
         if (ControlsLock::isLocked()) {
             ev->ignore();
             return;
         }
-        QSlider::wheelEvent(ev);
+        // Use singleStep (default 1) instead of pageStep (default 10) so
+        // that mouse-wheel adjustments are fine-grained (#1026).
+        int delta = ev->angleDelta().y();
+        if (delta != 0)
+            setValue(value() + (delta > 0 ? singleStep() : -singleStep()));
         ev->accept();
     }
 };
